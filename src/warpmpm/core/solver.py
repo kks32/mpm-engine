@@ -43,11 +43,13 @@ class Solver:
     device: str = "cpu"
     _sim: Any = field(default=None, init=False, repr=False)
     _step: int = field(default=0, init=False, repr=False)
+    _vol0: Any = field(default=None, init=False, repr=False)
 
     def load_particles(self, pos: np.ndarray, vol: np.ndarray) -> Solver:
         import torch
 
         _ensure_warp()
+        self._vol0 = vol.astype(np.float32).copy()
         self._sim = MPM_Simulator_WARP(len(pos), device=self.device)
         self._sim.load_initial_data_from_torch(
             torch.from_numpy(pos.astype(np.float32)),
@@ -76,6 +78,27 @@ class Solver:
         self._sim.add_surface_collider(tuple(point), tuple(normal), surface, friction=friction)
         return self
 
+    def add_box(self, center, half_size, velocity=(0.0, 0.0, 0.0),
+                start_time: float = 0.0, end_time: float = 1.0e9) -> int:
+        """A kinematic box collider (axis-aligned box-SDF) imposing its velocity on the
+        grid nodes it covers. Returns a handle; drive it each control tick with set_box.
+        This is the robot end-effector proxy for the coupling layer."""
+        self._sim.set_velocity_on_cuboid(
+            point=tuple(center), size=tuple(half_size), velocity=tuple(velocity),
+            start_time=start_time, end_time=end_time,
+        )
+        return len(self._sim.collider_params) - 1
+
+    def set_box(self, handle: int, center=None, velocity=None) -> Solver:
+        """Update a kinematic box's pose/velocity (called each control tick from the robot
+        end-effector). The fork's modify_bc advances the box within the substeps."""
+        p = self._sim.collider_params[handle]
+        if center is not None:
+            p.point = wp.vec3(float(center[0]), float(center[1]), float(center[2]))
+        if velocity is not None:
+            p.velocity = wp.vec3(float(velocity[0]), float(velocity[1]), float(velocity[2]))
+        return self
+
     def step(self, dt: float, substeps: int = 1) -> Solver:
         for _ in range(substeps):
             self._sim.p2g2p(self._step, dt, device=self.device)
@@ -94,6 +117,16 @@ class Solver:
 
     def stress(self) -> np.ndarray:
         return self._sim.export_particle_stress_to_torch().cpu().numpy().reshape(-1, 3, 3)
+
+    def vol(self) -> np.ndarray:
+        """Current particle volume V0 * det(F) (Cauchy stress = Kirchhoff / det F)."""
+        J = np.abs(np.linalg.det(self.F()))
+        return self._vol0 * J
+
+    def cauchy(self) -> np.ndarray:
+        """Cauchy stress per particle = Kirchhoff (exported) / det(F)."""
+        J = np.clip(np.abs(np.linalg.det(self.F())), 1e-9, None)
+        return self.stress() / J[:, None, None]
 
     @property
     def n_particles(self) -> int:
