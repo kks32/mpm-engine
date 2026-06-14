@@ -17,12 +17,25 @@ class FrankaArm:
     Q_UP = np.array([0.0, -0.3, 0.0, -1.9, 0.0, 1.6, 0.79])
     Q_DOWN = np.array([0.0, 0.35, 0.0, -2.4, 0.0, 2.75, 0.79])
 
-    def __init__(self, height: int = 480, width: int = 640):
+    def __init__(self, height: int = 480, width: int = 640, ft_sensor: bool = False):
         import mujoco
         from robot_descriptions import panda_mj_description
 
         self.mj = mujoco
-        self.model = mujoco.MjModel.from_xml_path(panda_mj_description.MJCF_PATH)
+        # optionally compile with a wrist force/torque sensor (a load cell at the hand)
+        self._ft = None
+        if ft_sensor:
+            spec = mujoco.MjSpec.from_file(panda_mj_description.MJCF_PATH)
+            hand = next((b for b in spec.bodies if b.name == "hand"), None)
+            if hand is not None:
+                hand.add_site(name="wrist_ft", pos=[0.0, 0.0, 0.0])
+                for nm, ty in (("wrist_force", mujoco.mjtSensor.mjSENS_FORCE),
+                               ("wrist_torque", mujoco.mjtSensor.mjSENS_TORQUE)):
+                    sn = spec.add_sensor(); sn.name = nm; sn.type = ty
+                    sn.objtype = mujoco.mjtObj.mjOBJ_SITE; sn.objname = "wrist_ft"
+            self.model = spec.compile()
+        else:
+            self.model = mujoco.MjModel.from_xml_path(panda_mj_description.MJCF_PATH)
         self.data = mujoco.MjData(self.model)
         # end-effector body = the hand (fall back to last body)
         try:
@@ -31,6 +44,9 @@ class FrankaArm:
             self.ee = self.model.nbody - 1
         if self.ee < 0:
             self.ee = self.model.nbody - 1
+        if ft_sensor and self.model.nsensor:
+            fid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_SENSOR, "wrist_force")
+            self._ft = int(self.model.sensor_adr[fid])
         # the default offscreen framebuffer is 640x480; enlarge it so any requested size renders
         self.model.vis.global_.offwidth = max(int(self.model.vis.global_.offwidth), width)
         self.model.vis.global_.offheight = max(int(self.model.vis.global_.offheight), height)
@@ -56,6 +72,32 @@ class FrankaArm:
         if track_camera:
             self.cam.lookat[:] = [ee_pos[0], ee_pos[1], ee_pos[2] - 0.2]
         return {"pos": ee_pos, "vel": ee_vel}
+
+    def wrist_load_cell(self, frac: float, f_dough_world, settle: int = 300) -> np.ndarray:
+        """Read the wrist force-torque sensor (the load cell) for the reaction the dough
+        exerts on the arm. The arm is held at descent fraction `frac` by its position
+        actuators; we settle it with no load (baseline = the gripper's own weight) and with
+        the dough reaction `f_dough_world` applied to the hand, and return the DIFFERENCE --
+        the dough's contribution at the wrist. By Newton's third law this equals the force we
+        fed in (= the MPM grid-impulse reaction), now read at the wrist like a real robot.
+        Requires ft_sensor=True. Uses forward dynamics, so it mutates the arm state."""
+        if self._ft is None:
+            raise RuntimeError("FrankaArm was built without ft_sensor=True")
+        q = (1.0 - frac) * self.Q_UP + frac * self.Q_DOWN
+
+        def _settle(F):
+            self.data.qpos[:7] = q; self.data.qvel[:] = 0.0
+            if self.model.nu >= 7:
+                self.data.ctrl[:7] = q
+            for _ in range(settle):
+                self.data.xfrc_applied[self.ee, :3] = F
+                self.mj.mj_step(self.model, self.data)
+            self.data.xfrc_applied[self.ee, :3] = 0.0
+            return self.data.sensordata[self._ft:self._ft + 3].copy()
+
+        base = _settle(np.zeros(3))
+        loaded = _settle(np.asarray(f_dough_world, dtype=float))
+        return loaded - base
 
     def render_rgb(self) -> np.ndarray:
         self.renderer.update_scene(self.data, self.cam)
