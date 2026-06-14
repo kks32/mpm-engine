@@ -61,10 +61,12 @@ class FrankaArm:
         self.renderer.update_scene(self.data, self.cam)
         return self.renderer.render()
 
-    def render_with_particles(self, pts_world, rgba, radius=0.004, table=None):
+    def render_with_particles(self, pts_world, rgba, radius=0.004, table=None, boxes=None):
         """Composite render: the Franka + the MPM material as spheres in ONE camera view.
         pts_world (M,3) world-frame particle positions; rgba (M,4) per-particle colour;
-        table=(cx,cy,z,half) draws a flat support box. Subsample pts to fit max_geom."""
+        table=(cx,cy,z,half) draws a flat support box; boxes is a list of (center3, half3,
+        rgba4) drawn as solid boxes (e.g. a plate mounted on the gripper). Subsample pts to
+        fit max_geom."""
         self.renderer.update_scene(self.data, self.cam)
         sc = self.renderer.scene
         eye = np.eye(3).flatten()
@@ -74,6 +76,14 @@ class FrankaArm:
             self.mj.mjv_initGeom(g, self.mj.mjtGeom.mjGEOM_BOX,
                                  np.array([half, half, 0.01]), np.array([cx, cy, z - 0.01]),
                                  eye, np.array([0.55, 0.57, 0.6, 1.0], np.float32))
+            sc.ngeom += 1
+        for center, half3, col in (boxes or []):
+            if sc.ngeom >= sc.maxgeom:
+                break
+            g = sc.geoms[sc.ngeom]
+            self.mj.mjv_initGeom(g, self.mj.mjtGeom.mjGEOM_BOX,
+                                 np.asarray(half3, np.float64), np.asarray(center, np.float64),
+                                 eye, np.asarray(col, np.float32))
             sc.ngeom += 1
         room = sc.maxgeom - sc.ngeom
         n = len(pts_world)

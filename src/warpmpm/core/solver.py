@@ -122,6 +122,11 @@ class Solver:
     def stress(self) -> np.ndarray:
         return self._sim.export_particle_stress_to_torch().cpu().numpy().reshape(-1, 3, 3)
 
+    def L(self) -> np.ndarray:
+        """Per-particle velocity gradient L_ij = dv_i/dx_j from the most recent G2P. Use the
+        symmetric part D = sym(L) for the strain rate (and |gamma_dot| = sqrt(2 D:D + eps^2))."""
+        return self._sim.export_particle_L_to_torch().cpu().numpy().reshape(-1, 3, 3)
+
     def vol(self) -> np.ndarray:
         """Current particle volume V0 * det(F) (Cauchy stress = Kirchhoff / det F)."""
         J = np.abs(np.linalg.det(self.F()))
