@@ -91,7 +91,11 @@ class Solver:
 
     def set_box(self, handle: int, center=None, velocity=None) -> Solver:
         """Update a kinematic box's pose/velocity (called each control tick from the robot
-        end-effector). The fork's modify_bc advances the box within the substeps."""
+        end-effector). The fork's modify_bc advances point += dt*velocity on EVERY substep,
+        so over one tick the box sweeps center -> center + dt_ctrl*velocity. Drive it with
+        the START-of-tick center and the per-tick velocity (vz = (target - prev)/dt_ctrl);
+        the box then lands exactly on target by the end of the step. Passing the end-of-tick
+        target as center double-applies the motion and leaves the box one tick ahead."""
         p = self._sim.collider_params[handle]
         if center is not None:
             p.point = wp.vec3(float(center[0]), float(center[1]), float(center[2]))

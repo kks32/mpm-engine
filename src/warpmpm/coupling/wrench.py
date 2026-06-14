@@ -1,11 +1,15 @@
 """Per-link reaction wrench from the MPM material (Newton's third law).
 
-v1 estimator: integrate the Cauchy traction the material exerts on a horizontal contact
-layer just beneath a box end-effector (the validated squeeze-flow plate-force method:
-F = -sum_contact (sigma . e_z) * vol / T_layer). Force on the gripper opposes the press
-(down-press -> up reaction). A later kernel-level readout (grid impulse capture) will
-replace this with a per-substep exact wrench; this stress-integral version is the
-cross-validation baseline.
+v1 estimator (uncalibrated, stress-integral): integrate the Cauchy traction the material
+exerts on a horizontal contact layer just beneath a box end-effector,
+F = -sum_contact (sigma . e_z) * vol / T_layer. Force on the gripper opposes the press
+(down-press -> up reaction). The contact band selects particles by position only, so it
+can catch free-surface / EOS-ring particles momentarily in TENSION; we gate the band on
+compressive normal stress (sigma_zz < 0) so only particles actually pressing the box
+contribute, which removes the wrong-signed low-force transient. This is the
+cross-validation baseline; a later kernel-level grid-impulse capture will replace it with
+a per-substep exact wrench whose magnitude can be calibrated against an analytic plate
+force.
 """
 from __future__ import annotations
 
@@ -13,13 +17,15 @@ import numpy as np
 
 
 def box_contact_wrench(x, cauchy, vol, box_center, box_half, layer_cells: float | None = None,
-                       dx: float | None = None) -> dict:
+                       dx: float | None = None, compressive_only: bool = True) -> dict:
     """Reaction wrench on a box end-effector from the dough it presses.
 
     x        : (N,3) particle positions
     cauchy   : (N,3,3) Cauchy stress
     vol      : (N,) particle volume
     box_center, box_half : the kinematic box (centre, half-extents)
+    compressive_only : keep only particles in compression (sigma_zz < 0) in the contact
+                       band; rejects free-surface / EOS-ring tension that flips the sign.
     Returns force[3], torque[3] (about box_center), contact count, normal force.
     """
     cx, cy, cz = box_center
@@ -29,6 +35,8 @@ def box_contact_wrench(x, cauchy, vol, box_center, box_half, layer_cells: float 
     bottom = cz - hz
     under = (np.abs(x[:, 0] - cx) < hx) & (np.abs(x[:, 1] - cy) < hy)
     contact = under & (x[:, 2] > bottom - T) & (x[:, 2] < bottom + 0.5 * T)
+    if compressive_only:
+        contact &= cauchy[:, 2, 2] < 0.0   # only particles pressing the box, not in tension
     if contact.sum() < 3:
         return {"force": np.zeros(3), "torque": np.zeros(3), "n_contact": 0, "Fz": 0.0}
     # traction the material exerts on a downward-facing box bottom is -(sigma . e_z);

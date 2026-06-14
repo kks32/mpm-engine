@@ -31,6 +31,9 @@ class FrankaArm:
             self.ee = self.model.nbody - 1
         if self.ee < 0:
             self.ee = self.model.nbody - 1
+        # the default offscreen framebuffer is 640x480; enlarge it so any requested size renders
+        self.model.vis.global_.offwidth = max(int(self.model.vis.global_.offwidth), width)
+        self.model.vis.global_.offheight = max(int(self.model.vis.global_.offheight), height)
         self.renderer = mujoco.Renderer(self.model, height=height, width=width)
         self.cam = mujoco.MjvCamera()
         mujoco.mjv_defaultCamera(self.cam)
@@ -39,8 +42,10 @@ class FrankaArm:
         self.cam.elevation = -20
         self._prev_ee = None
 
-    def set_descent(self, frac: float, dt: float) -> dict:
-        """Set the arm to a scripted descent fraction in [0,1]; return EE world pose+vel."""
+    def set_descent(self, frac: float, dt: float, track_camera: bool = True) -> dict:
+        """Set the arm to a scripted descent fraction in [0,1]; return EE world pose+vel.
+        track_camera follows the EE with the camera (good for the 2-panel view); pass False
+        when the caller drives a fixed camera (e.g. the composite single-view)."""
         q = (1.0 - frac) * self.Q_UP + frac * self.Q_DOWN
         self.data.qpos[:7] = q
         self.mj.mj_forward(self.model, self.data)
@@ -48,9 +53,37 @@ class FrankaArm:
         ee_vel = (np.zeros(3) if (self._prev_ee is None or dt <= 0)
                   else (ee_pos - self._prev_ee) / dt)
         self._prev_ee = ee_pos
-        self.cam.lookat[:] = [ee_pos[0], ee_pos[1], ee_pos[2] - 0.2]
+        if track_camera:
+            self.cam.lookat[:] = [ee_pos[0], ee_pos[1], ee_pos[2] - 0.2]
         return {"pos": ee_pos, "vel": ee_vel}
 
     def render_rgb(self) -> np.ndarray:
         self.renderer.update_scene(self.data, self.cam)
+        return self.renderer.render()
+
+    def render_with_particles(self, pts_world, rgba, radius=0.004, table=None):
+        """Composite render: the Franka + the MPM material as spheres in ONE camera view.
+        pts_world (M,3) world-frame particle positions; rgba (M,4) per-particle colour;
+        table=(cx,cy,z,half) draws a flat support box. Subsample pts to fit max_geom."""
+        self.renderer.update_scene(self.data, self.cam)
+        sc = self.renderer.scene
+        eye = np.eye(3).flatten()
+        if table is not None:
+            cx, cy, z, half = table
+            g = sc.geoms[sc.ngeom]
+            self.mj.mjv_initGeom(g, self.mj.mjtGeom.mjGEOM_BOX,
+                                 np.array([half, half, 0.01]), np.array([cx, cy, z - 0.01]),
+                                 eye, np.array([0.55, 0.57, 0.6, 1.0], np.float32))
+            sc.ngeom += 1
+        room = sc.maxgeom - sc.ngeom
+        n = len(pts_world)
+        stride = max(1, int(np.ceil(n / max(room, 1))))
+        for i in range(0, n, stride):
+            if sc.ngeom >= sc.maxgeom:
+                break
+            g = sc.geoms[sc.ngeom]
+            self.mj.mjv_initGeom(g, self.mj.mjtGeom.mjGEOM_SPHERE,
+                                 np.array([radius, 0.0, 0.0]), pts_world[i].astype(np.float64),
+                                 eye, rgba[i].astype(np.float32))
+            sc.ngeom += 1
         return self.renderer.render()

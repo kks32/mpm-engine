@@ -1,9 +1,25 @@
-"""warpmpm: a fast, modular Warp-MPM engine for robot manipulation of deformable and
-granular media (dough first; terrain / rovers next). Sparse-grid + implicit core,
-primitive-SDF robot contact with per-link wrench readout, MuJoCo coupling (Isaac-ready)."""
+"""warpmpm: a modular Warp-MPM engine for robot manipulation of deformable and granular
+media (dough first; terrain / rovers next). Today: a dense, explicit MLS/APIC core wrapping
+the validated warp-mpm fork, a kinematic box collider as the robot end-effector proxy, a
+stress-integral reaction-wrench readout, and a MuJoCo coupling adapter. Sparse active-block
+grid + implicit Newton-CG are the planned fast path (see README roadmap)."""
 from __future__ import annotations
 
 from warpmpm.core.solver import GridConfig, Solver
+from warpmpm.coupling.wrench import box_contact_wrench
+from warpmpm.materials import Material, elastic, granular, newtonian
+from warpmpm.scenes import block, dough
 
 __version__ = "0.0.1"
-__all__ = ["GridConfig", "Solver", "__version__"]
+__all__ = [
+    "GridConfig",
+    "Material",
+    "Solver",
+    "__version__",
+    "block",
+    "box_contact_wrench",
+    "dough",
+    "elastic",
+    "granular",
+    "newtonian",
+]

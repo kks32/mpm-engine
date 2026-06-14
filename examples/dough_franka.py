@@ -60,12 +60,14 @@ def run(n_grid=48, ticks=60, substeps=40, dt=2.0e-5, press_depth=0.025, render_e
     for t in range(ticks + 1):
         frac = t / ticks
         arm.set_descent(frac, dt_ctrl)   # poses the Franka for the render
-        box_z = z0 - press_depth * frac
+        box_z = z0 - press_depth * frac  # end-of-tick target
         vz = (box_z - prev_z) / dt_ctrl
-        prev_z = box_z
-        s.set_box(handle, center=(cx, cy, box_z), velocity=(0, 0, vz))
+        # drive from the START-of-tick position; modify_bc integrates it to box_z over
+        # the substeps (passing box_z as center would leave the box one tick ahead)
+        s.set_box(handle, center=(cx, cy, prev_z), velocity=(0, 0, vz))
         if t > 0:
             s.step(dt, substeps)
+        prev_z = box_z
         w = box_contact_wrench(s.x(), s.cauchy(), s.vol(), (cx, cy, box_z), box_half)
         log.append((t * dt_ctrl, box_z, w["Fz"], w["n_contact"]))
         if t % render_every == 0:
