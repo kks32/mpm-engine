@@ -88,7 +88,7 @@ def run(n_grid=48, ticks=60, substeps=40, dt=2.0e-5, press_depth=0.025, render_e
             fp = tmp / f"f_{len(frames):04d}.png"
             fig.savefig(fp, dpi=120, facecolor="white"); plt.close(fig)
             frames.append(fp)
-        print(f"tick {t:3d}/{ticks}  box_z={box_z:.3f}  Fz={w['Fz']:7.2f} N  n_contact={w['n_contact']}")
+        print(f"tick {t:3d}/{ticks} z={box_z:.3f} Fz={w['Fz']:6.1f}N nc={w['n_contact']}")
 
     OUT.mkdir(exist_ok=True)
     mp4 = OUT / "dough_franka.mp4"
