@@ -45,10 +45,8 @@ class FrankaArm:
         self.data.qpos[:7] = q
         self.mj.mj_forward(self.model, self.data)
         ee_pos = self.data.xpos[self.ee].copy()
-        if self._prev_ee is None or dt <= 0:
-            ee_vel = np.zeros(3)
-        else:
-            ee_vel = (ee_pos - self._prev_ee) / dt
+        ee_vel = (np.zeros(3) if (self._prev_ee is None or dt <= 0)
+                  else (ee_pos - self._prev_ee) / dt)
         self._prev_ee = ee_pos
         self.cam.lookat[:] = [ee_pos[0], ee_pos[1], ee_pos[2] - 0.2]
         return {"pos": ee_pos, "vel": ee_vel}
