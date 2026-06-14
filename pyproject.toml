@@ -13,6 +13,7 @@ dependencies = [
 dev = ["pytest>=8.0", "ruff>=0.6", "ty"]
 mujoco = ["mujoco>=3.1"]
 render = ["matplotlib>=3.8", "imageio>=2.34", "imageio-ffmpeg>=0.4.9"]
+surface = ["scipy>=1.11", "scikit-image>=0.22"]   # marching-cubes dough-surface render
 
 [build-system]
 requires = ["hatchling"]
