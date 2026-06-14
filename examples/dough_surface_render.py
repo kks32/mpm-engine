@@ -13,6 +13,7 @@ from pathlib import Path
 
 import numpy as np
 from scipy.ndimage import gaussian_filter
+from scipy.spatial import cKDTree
 from skimage.measure import marching_cubes
 
 from warpmpm import GridConfig, Solver, block, newtonian
@@ -47,7 +48,8 @@ def _box_polys(cx, cy, cz, hx, hy, hz):
 
 
 def run(tau_y=200.0, eta=40.0, geom=(0.16, 0.16, 0.06), n_grid=52, v_plate=0.08,
-        press_strain=0.5, dt=1.0e-4, substeps=20, frame_stride=6, still_frac=0.55):
+        press_strain=0.5, dt=1.0e-4, substeps=20, frame_stride=6, still_frac=0.55,
+        speckle_tex=True):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -64,6 +66,9 @@ def run(tau_y=200.0, eta=40.0, geom=(0.16, 0.16, 0.06), n_grid=52, v_plate=0.08,
     be = WarpMPMBackend(solver=s)
     z = floor + ch + bh[2]
     tool = be.attach_tool((cx, cy, z), bh)
+    # per-particle MATERIAL-LOCKED speckle (flour flecks): fixed brightness per material point,
+    # so the texture deforms WITH the dough (this is also what makes the surface trackable)
+    speckle = np.random.default_rng(0).uniform(0.0, 1.0, len(pos))
     fdt = dt * substeps
     nf = round(press_strain * ch / v_plate / fdt)
     tmp = OUT / "_frames"; tmp.mkdir(exist_ok=True)
@@ -79,11 +84,17 @@ def run(tau_y=200.0, eta=40.0, geom=(0.16, 0.16, 0.06), n_grid=52, v_plate=0.08,
         z = zn; prev = zn
         if f % frame_stride and f != still_at:
             continue
-        vw, faces, fn = _surface(s.x())
+        xp = s.x()
+        vw, faces, fn = _surface(xp)
         sh = np.clip(fn @ LIGHT, 0, 1) * 0.6 + 0.4
         up = fn[:, 2] > 0.4                                    # top faces a touch browner
         base = np.where(up[:, None], DOUGH_TOP, DOUGH)
-        fc = np.clip(sh[:, None] * base, 0, 1)
+        if speckle_tex:
+            _, idx = cKDTree(xp).query(vw[faces].mean(1))      # nearest material point / face
+            tex = np.clip(0.6 + 0.55 * speckle[idx], 0.45, 1.2)  # flour flecks, material-locked
+            fc = np.clip((sh * tex)[:, None] * base, 0, 1)
+        else:
+            fc = np.clip(sh[:, None] * base, 0, 1)
         fig = plt.figure(figsize=(7, 5.2), facecolor="white")
         ax = fig.add_subplot(111, projection="3d")
         tri = Poly3DCollection(vw[faces], facecolors=fc, edgecolors="none")
