@@ -6,15 +6,20 @@ grid + implicit Newton-CG are the planned fast path (see README roadmap)."""
 from __future__ import annotations
 
 from warpmpm.core.solver import GridConfig, Solver
+from warpmpm.coupling.admittance import ForceAdmittance, Impedance1D
+from warpmpm.coupling.backend import WarpMPMBackend
 from warpmpm.coupling.wrench import box_contact_wrench
 from warpmpm.materials import Material, elastic, granular, newtonian
 from warpmpm.scenes import block, dough
 
 __version__ = "0.0.1"
 __all__ = [
+    "ForceAdmittance",
     "GridConfig",
+    "Impedance1D",
     "Material",
     "Solver",
+    "WarpMPMBackend",
     "__version__",
     "block",
     "box_contact_wrench",
