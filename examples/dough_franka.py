@@ -59,7 +59,7 @@ def run(n_grid=48, ticks=60, substeps=40, dt=2.0e-5, press_depth=0.025, render_e
     tmp = Path(tempfile.mkdtemp())
     for t in range(ticks + 1):
         frac = t / ticks
-        ee = arm.set_descent(frac, dt_ctrl)
+        arm.set_descent(frac, dt_ctrl)   # poses the Franka for the render
         box_z = z0 - press_depth * frac
         vz = (box_z - prev_z) / dt_ctrl
         prev_z = box_z

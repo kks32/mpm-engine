@@ -28,7 +28,7 @@ src = ["src", "tests", "benchmarks", "examples"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "SIM", "RUF"]
-ignore = ["E402"]   # _vendor.py mutates sys.path before importing the warp-mpm fork
+ignore = ["E402", "E701", "E702"]   # E402: _vendor sys.path; E701/E702: compact tuple/render lines
 
 [tool.ruff.lint.per-file-ignores]
 "src/warpmpm/_vendor.py" = ["E402", "F401"]

@@ -12,8 +12,8 @@ from __future__ import annotations
 import numpy as np
 
 
-def box_contact_wrench(x, cauchy, vol, box_center, box_half, layer_cells: float = None,
-                       dx: float = None) -> dict:
+def box_contact_wrench(x, cauchy, vol, box_center, box_half, layer_cells: float | None = None,
+                       dx: float | None = None) -> dict:
     """Reaction wrench on a box end-effector from the dough it presses.
 
     x        : (N,3) particle positions
