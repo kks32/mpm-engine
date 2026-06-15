@@ -20,11 +20,12 @@ from __future__ import annotations
 
 import dataclasses
 from dataclasses import dataclass
+from typing import Any
 
 
 @dataclass(frozen=True)
 class Material:
-    base: str  # "newtonian" | "granular" | "elastic"
+    base: str  # "newtonian" | "granular" | "elastic" | "tabulated"
     E: float = 1.0e5
     nu: float = 0.3
     density: float = 1000.0
@@ -44,6 +45,11 @@ class Material:
     dilatant: bool = False
     phi_init: float = 0.6
     phi_chi: float = 0.2
+    # tabulated apparent viscosity (base="tabulated"): eta_app(gd) samples on a uniform
+    # log10(gd) grid in [eta_smin, eta_smax]; used to re-simulate an FE-recovered curve.
+    eta_table: Any = None        # 1D array-like of eta_app samples (Pa.s)
+    eta_smin: float = -1.0
+    eta_smax: float = 2.0
 
     # ---- composable modifiers (return a new Material) -------------------------------
     def with_viscosity(self, eta: float) -> Material:
@@ -84,6 +90,14 @@ class Material:
             return "mu_i_sand", params
         if self.base == "elastic":
             return "jelly", dict(E=self.E, nu=self.nu, density=self.density)
+        if self.base == "tabulated":
+            if self.eta_table is None:
+                raise ValueError("tabulated material needs eta_table")
+            return "tabulated_viscous", dict(
+                E=self.E, nu=self.nu, density=self.density, bulk_modulus=self.bulk_modulus,
+                eta_table=list(self.eta_table), eta_table_smin=self.eta_smin,
+                eta_table_smax=self.eta_smax,
+            )
         raise ValueError(f"unknown material base {self.base!r}")
 
 
@@ -109,4 +123,13 @@ def elastic(E: float = 1.0e5, nu: float = 0.3, density: float = 1000.0) -> Mater
     return Material(base="elastic", E=E, nu=nu, density=density)
 
 
-__all__ = ["Material", "elastic", "granular", "newtonian"]
+def tabulated_viscous(eta_table, smin: float = -1.0, smax: float = 2.0,
+                      density: float = 1000.0, bulk_modulus: float = 9.0e5) -> Material:
+    """Weakly-compressible fluid whose apparent viscosity eta_app(gd) is read from a table
+    on a uniform log10(gd) grid in [smin, smax] (clamped linear interp). Lets an FE-recovered
+    eta_app curve be re-simulated directly, with no parametric fit."""
+    return Material(base="tabulated", eta_table=eta_table, eta_smin=smin, eta_smax=smax,
+                    density=density, bulk_modulus=bulk_modulus)
+
+
+__all__ = ["Material", "elastic", "granular", "newtonian", "tabulated_viscous"]

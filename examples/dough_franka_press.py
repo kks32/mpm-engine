@@ -98,6 +98,8 @@ def run(n_grid=48, ticks=130, substeps=24, dt=2.0e-5, f_target=40.0, v_max=0.45,
             backend.set_tool_kinematics(tool, center=(cx, cy, z), velocity=(0, 0, vz))
             backend.step(dt, substeps)
         z = z_new
+        # static-contact stress integral for the force controller (the grid impulse collapses
+        # at a quasi-static halt; see WarpMPMBackend.get_tool_wrench)
         w = backend.get_tool_wrench(tool, at_center=(cx, cy, z))
         f_react = float(w["Fz"])
         f_filt = f_lowpass * f_react + (1.0 - f_lowpass) * f_filt

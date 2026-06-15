@@ -12,7 +12,7 @@ SAME identification -- the mechanical power balance
 so regressing the measured dissipation (from the plate reaction force, gravity power, and the
 kinetic-energy rate) against (INT|gd|, INT|gd|^2) over the squeeze recovers (tau_y, eta) from
 the boundary force alone. We then compare the recovered law to ground truth and to the 2D
-result. |gd| = sqrt(2 D:D + eps^2), D = sym(L), eps = 0.02 (matching the 2D convention).
+result. |gd| = sqrt(2 dev(D):dev(D) + eps^2), D = sym(L), eps = 0.05 (matching the kernel).
 
 Run:  ../.venv/bin/python examples/squeeze_plate_franka.py
 """
@@ -30,15 +30,17 @@ from warpmpm.coupling.backend import WarpMPMBackend
 
 OUT = Path(__file__).resolve().parents[1] / "out"
 G_MAG = 9.81
-EPS_GAMMA = 0.02
+EPS_GAMMA = 0.05   # match the warp-mpm kernel's shear-rate regularization
 # the validated 2D quasi-plane-strain result (perception/squeeze_force.json), for reference
 REF_2D = {"tau_y_hat": 272.0, "eta_hat": 50.3, "tau_y_true": 200.0, "eta_true": 40.0}
 
 
 def equivalent_shear_rate(L: np.ndarray) -> np.ndarray:
-    """|gd|_eps = sqrt(2 D:D + eps^2), D = sym(L). Returns gamma for simple shear."""
+    """|gd|_eps = sqrt(2 dev(D):dev(D) + eps^2), D = sym(L); matches the kernel exactly."""
     D = 0.5 * (L + np.transpose(L, (0, 2, 1)))
-    dd = np.einsum("...ij,...ij->...", D, D)
+    tr = (D[..., 0, 0] + D[..., 1, 1] + D[..., 2, 2]) / 3.0
+    Dd = D - tr[..., None, None] * np.eye(3)
+    dd = np.einsum("...ij,...ij->...", Dd, Dd)
     return np.sqrt(2.0 * dd + EPS_GAMMA * EPS_GAMMA)
 
 

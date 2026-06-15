@@ -45,10 +45,16 @@ class WarpMPMBackend:
         self.solver.step(dt, substeps)
 
     def get_tool_wrench(self, tool_id: int, at_center=None, **kw) -> dict:
-        """Reaction wrench the material exerts on the tool (Newton's third law). Evaluate at
-        the post-step tool position (pass at_center=end-of-tick centre); compressive-gated.
-        This is the stress-integral estimator (uncalibrated); for the calibrated value use
-        reset_tool_force/get_tool_reaction (the exact grid impulse)."""
+        """Quasi-STATIC contact wrench from the stress integral over the box, for the force
+        CONTROLLER (admittance/impedance) feedback. This and the grid impulse measure DIFFERENT
+        things and must not be conflated: the grid impulse (reset_tool_force/get_tool_reaction)
+        is the Newton-exact DYNAMIC reaction, F = sum m (v_free - v_imposed)/dt, which is the
+        calibrated lever for the moving-contact IDENTIFICATION (the squeeze, the shear cell);
+        but at a quasi-static halt v_free -> v_imposed so that impulse collapses, while the
+        static contact force the controller must regulate against is still large and is what
+        this stress integral reports. Hence: grid impulse for moving-contact identification,
+        this wrench for static-contact force control. Uncalibrated (biases the stress estimate),
+        but the right signal for a halt; evaluate at the post-step centre (at_center)."""
         t = self._tools[tool_id]
         c = tuple(map(float, at_center)) if at_center is not None else t["center"]
         return box_contact_wrench(

@@ -33,7 +33,7 @@ REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
 OUT = Path(__file__).resolve().parents[1] / "out" / "realdata"
 G = 9.81
-EPS = 0.02
+EPS = 0.05   # match the warp-mpm kernel's shear-rate regularization
 TRUTH = (200.0, 40.0)
 LIGHT = np.array([0.3, 0.4, 0.86]); LIGHT = LIGHT / np.linalg.norm(LIGHT)
 DOUGH = np.array([0.93, 0.80, 0.55])
@@ -142,14 +142,18 @@ def make_dataset(scale, tag, n_grid=64, v_plate=0.08, press_strain=0.5, dt=1.0e-
 
 
 # ----------------------------------------------------------------------- ingestion + identify
-def identify(tag, t_lo_frac=0.12, t_hi_frac=0.92):
+def identify(tag, t_lo_frac=0.12, t_hi_frac=0.92, reuse_tracks=True):
     from ident.weakform.field_reconstruction import StreamFunctionField
     from perception.track import track
     d = OUT / tag
     meta = _loadj(d / "meta.json")
     force = np.loadtxt(d / "force.csv", delimiter=",", skiprows=1)     # (t, F) measured
-    tr = track(str(d / "cam.json"), out_path=str(d / "tracks.npz"),
-               query_spacing=6, device="cpu")
+    tp = d / "tracks.npz"
+    if reuse_tracks and tp.exists():                  # tracks are eps-independent: reuse them
+        _t = np.load(tp)
+        tr = {k: _t[k] for k in _t.files}
+    else:
+        tr = track(str(d / "cam.json"), out_path=str(tp), query_spacing=6, device="cpu")
     W = tr["world_tracks"]; vis = tr["visibility"]; times = tr["times"]   # (T,N,2)=(x,z)
     n = len(times); dt = float(meta["frame_dt"]); rho = meta["rho"]; slab = meta["slab"]
     vp = meta["v_plate"]
@@ -177,6 +181,8 @@ def identify(tag, t_lo_frac=0.12, t_hi_frac=0.92):
         cov = dist < 1.6 * max(gx[1] - gx[0], gz[1] - gz[0])
         L = fld.grad_v(grid)                                          # (M,2,2)
         D = 0.5 * (L + np.transpose(L, (0, 2, 1)))
+        # StreamFunction field is divergence-free so D is already deviatoric (plane strain,
+        # sigma_yy carries no in-plane shear), matching the kernel's dev(D); only eps differs.
         gd = np.sqrt(2.0 * np.einsum("...ij,...ij->...", D, D) + EPS ** 2)
         vg = fld.velocity(grid)
         X1 = float(np.sum(gd[cov]) * cell_a * slab)

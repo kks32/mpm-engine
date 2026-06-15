@@ -39,8 +39,11 @@ def eta_app_true(gd):
 
 
 def _gd(L):
+    # match the kernel exactly: |gd|_eps = sqrt(2 dev(D):dev(D) + eps^2), eps=0.05
     D = 0.5 * (L + np.transpose(L, (0, 2, 1)))
-    return np.sqrt(2.0 * np.einsum("...ij,...ij->...", D, D) + EPS ** 2)
+    tr = (D[..., 0, 0] + D[..., 1, 1] + D[..., 2, 2]) / 3.0
+    Dd = D - tr[..., None, None] * np.eye(3)
+    return np.sqrt(2.0 * np.einsum("...ij,...ij->...", Dd, Dd) + EPS ** 2)
 
 
 def squeeze(v_plate, fe, n_grid=48, geom=(0.12, 0.12, 0.06), press_strain=0.5,
