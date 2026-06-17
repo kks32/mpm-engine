@@ -46,12 +46,16 @@ def equivalent_shear_rate(L: np.ndarray) -> np.ndarray:
 
 def power_balance_identify(rec: dict, v_plate: float, frame_dt: float,
                            t_lo: float, t_hi: float, correct_eos: bool = False) -> dict:
-    """Regress measured dissipation against (INT|gd|, INT|gd|^2) to recover (tau_y, eta).
+    """Regress measured dissipation against the exact deviatoric-power columns
+    (INT q/gd dV, INT q dV), q = 2 dev(D):dev(D), to recover (tau_y, eta).
 
     The 2D test assumes incompressibility (INT p div v = 0). The MPM dough is weakly
     compressible, so with correct_eos=True we add back the volumetric work term
-    INT p div(v) dV, recovering the true deviatoric dissipation INT tau:D and removing the
-    EOS bias that otherwise inflates the recovered coefficients."""
+    INT p div(v) dV. IMPORTANT: that p is the ORACLE Cauchy-trace pressure (s.cauchy()),
+    so correct_eos is an ORACLE-STRESS correction, NOT an EOS-from-kinematics one -- a
+    real load-cell/video pipeline does not have it unless pressure or density is separately
+    observed or inferred. It is reported here as the upper bound on what removing the EOS
+    bias buys; the deployable number is the correct_eos=False column."""
     times = np.asarray(rec["t"]); Fp = np.asarray(rec["F_plate"])
     Pg = np.asarray(rec["P_grav"]); KE = np.asarray(rec["KE"])
     X1 = np.asarray(rec["X1"]); X2 = np.asarray(rec["X2"]); Pvol = np.asarray(rec["Pvol"])
@@ -160,16 +164,26 @@ def run(n_grid=48, v_plate=0.08, eta=40.0, tau_y=200.0, density=1000.0, bulk=9.0
         F_stress = float(-np.sum(szz[band] * vol[band]) / T_layer) if band.sum() >= 5 else 0.0
         n_contact = int(band.sum())
         gd = equivalent_shear_rate(L)
-        p = -(cau[:, 0, 0] + cau[:, 1, 1] + cau[:, 2, 2]) / 3.0      # 3D-trace pressure
+        # EXACT kernel deviatoric power columns. The HB Kirchhoff stress is 2 eta_app dev(D) with
+        # eta_app = eta + tau_y/gd, so the deviatoric stress power density is
+        #   stress:dev(D) = 2 eta_app (dev(D):dev(D)) = eta_app * q,  q = 2 dev(D):dev(D) = gd^2 - eps^2.
+        # Hence power = tau_y * (q/gd) + eta * q, i.e. the tau_y column is INT (q/gd) dV and the eta
+        # column is INT q dV. (Using gd and gd^2 directly is only the eps->0 limit and slightly
+        # over-counts the regularization floor at low shear.)
+        q = np.maximum(gd ** 2 - EPS_GAMMA ** 2, 0.0)               # 2 dev(D):dev(D)
+        p = -(cau[:, 0, 0] + cau[:, 1, 1] + cau[:, 2, 2]) / 3.0      # 3D-trace pressure (ORACLE stress)
         div_v = L[:, 0, 0] + L[:, 1, 1] + L[:, 2, 2]                 # tr(L) = div(v)
         rec["t"].append(f * frame_dt)
         rec["F_plate"].append(F_react)
         rec["F_stress"].append(F_stress)
         rec["P_grav"].append(float(np.sum(density * (-G_MAG) * v[:, 2] * vol)))
         rec["KE"].append(float(0.5 * density * np.sum(vol * np.sum(v ** 2, axis=1))))
-        rec["X1"].append(float(np.sum(gd * vol)))
-        rec["X2"].append(float(np.sum(gd ** 2 * vol)))
-        rec["Pvol"].append(float(np.sum(p * div_v * vol)))           # INT p div(v) dV
+        rec["X1"].append(float(np.sum((q / np.maximum(gd, 1e-12)) * vol)))   # tau_y column: INT (q/gd) dV
+        rec["X2"].append(float(np.sum(q * vol)))                             # eta column:   INT q dV
+        # NOTE: Pvol uses the ORACLE Cauchy-trace pressure p; the correct_eos path below is therefore
+        # an ORACLE-STRESS correction, NOT an EOS-from-kinematics one. A load-cell pipeline cannot
+        # form INT p div(v) unless pressure/density is separately observed or inferred (see report).
+        rec["Pvol"].append(float(np.sum(p * div_v * vol)))           # INT p div(v) dV (oracle p)
         plate_bottom = z - plate_hz
         rec["strain"].append((col_h - (plate_bottom - floor)) / col_h)
         rec["gap_mm"].append((plate_bottom - floor) * 1e3)
