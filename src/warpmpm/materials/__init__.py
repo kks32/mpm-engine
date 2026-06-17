@@ -35,6 +35,8 @@ class Material:
     yield_stress: float = 0.0    # tau_y [Pa] (Bingham)
     powerlaw_K: float = 0.0      # consistency (hardening)
     powerlaw_n: float = 1.0      # exponent (softening); n<1 shear-thinning
+    # von-Mises (J2) elasto-plastic solid (base="vonmises", fork "metal"=1): HOLDS a shape
+    hardening_xi: float = 0.0    # isotropic hardening modulus (xi); 0 = perfectly plastic
     # granular mu(I) components (base="granular")
     mu_s: float = 0.0
     delta_mu: float = 0.0
@@ -90,6 +92,11 @@ class Material:
             return "mu_i_sand", params
         if self.base == "elastic":
             return "jelly", dict(E=self.E, nu=self.nu, density=self.density)
+        if self.base == "vonmises":
+            # fork "metal" (id 1): StVK elastic predictor + von-Mises (J2) radial return. A solid
+            # that HOLDS a shape; identified by (G via E,nu) and yield_stress, with optional xi.
+            return "metal", dict(E=self.E, nu=self.nu, density=self.density,
+                                 yield_stress=self.yield_stress, xi=self.hardening_xi)
         if self.base == "tabulated":
             if self.eta_table is None:
                 raise ValueError("tabulated material needs eta_table")
@@ -123,6 +130,16 @@ def elastic(E: float = 1.0e5, nu: float = 0.3, density: float = 1000.0) -> Mater
     return Material(base="elastic", E=E, nu=nu, density=density)
 
 
+def vonmises(E: float = 5.0e5, nu: float = 0.3, yield_stress: float = 2.0e3,
+             hardening_xi: float = 0.0, density: float = 1000.0) -> Material:
+    """von-Mises (J2) elasto-plastic solid -- the elastic shear modulus G=E/2(1+nu) sets the
+    pre-yield stiffness, yield_stress sets the plastic flow threshold, xi the isotropic
+    hardening. It HOLDS a shape after the tool releases (true plasticity), the dough/plasticine
+    analog used by RoboCraft/RoboCook. Identified by the convex weak-form solve as (G, yield)."""
+    return Material(base="vonmises", E=E, nu=nu, yield_stress=yield_stress,
+                    hardening_xi=hardening_xi, density=density)
+
+
 def tabulated_viscous(eta_table, smin: float = -1.0, smax: float = 2.0,
                       density: float = 1000.0, bulk_modulus: float = 9.0e5) -> Material:
     """Weakly-compressible fluid whose apparent viscosity eta_app(gd) is read from a table
@@ -132,4 +149,4 @@ def tabulated_viscous(eta_table, smin: float = -1.0, smax: float = 2.0,
                     density=density, bulk_modulus=bulk_modulus)
 
 
-__all__ = ["Material", "elastic", "granular", "newtonian", "tabulated_viscous"]
+__all__ = ["Material", "elastic", "granular", "newtonian", "tabulated_viscous", "vonmises"]
