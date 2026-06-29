@@ -32,7 +32,7 @@ G_MAG = 9.81
 N_GRID = 48
 GRID_LIM = 0.4
 GEOM = (0.12, 0.06, 0.045)        # (Lx, Ly, Lz): a genuine 3D block (free in y)
-FE_TABLE = REPO / "out" / "function_encoder" / "fe_viscous_table.npz"
+FE_TABLE = REPO / "mpm_engine" / "fe-weights" / "viscous.npz"
 
 
 def _build_block(grid: GridConfig):

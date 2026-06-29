@@ -11,9 +11,11 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "ruff>=0.6", "ty"]
-mujoco = ["mujoco>=3.1"]
-render = ["matplotlib>=3.8", "imageio>=2.34", "imageio-ffmpeg>=0.4.9"]
-surface = ["scipy>=1.11", "scikit-image>=0.22"]   # marching-cubes dough-surface render
+mujoco = ["mujoco>=3.1", "robot_descriptions>=1.10"]   # FrankaArm loads the Panda from robot_descriptions
+render = ["matplotlib>=3.8", "imageio>=2.34", "imageio-ffmpeg>=0.4.9", "pillow>=10.0"]
+surface = ["scipy>=1.11", "scikit-image>=0.22", "pyvista>=0.43"]   # marching-cubes dough-surface render
+io = ["h5py>=3.10"]                                # optional .h5 particle loader (load_from_sampling)
+all = ["warpmpm[dev,mujoco,render,surface,io]"]    # everything, for a full dev/demo checkout
 
 [build-system]
 requires = ["hatchling"]
@@ -29,10 +31,13 @@ src = ["src", "tests", "benchmarks", "examples"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "SIM", "RUF"]
-ignore = ["E402", "E701", "E702"]   # E402: _vendor sys.path; E701/E702: compact tuple/render lines
+ignore = ["E402", "E701", "E702"]   # E701/E702: compact tuple/render lines
 
 [tool.ruff.lint.per-file-ignores]
-"src/warpmpm/_vendor.py" = ["E402", "F401"]
+"src/warpmpm/kernels/__init__.py" = ["F401"]   # re-export surface
+# vendored+extended MLS-MPM kernels: silence star-import/style noise but KEEP real-bug checks
+# (F821 undefined-name, F811 redefinition) active
+"src/warpmpm/kernels/*.py" = ["E", "I", "UP", "SIM", "B", "RUF", "F401", "F403", "F405", "F841"]
 
 [tool.ty.environment]
 python-version = "3.12"

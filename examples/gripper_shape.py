@@ -77,10 +77,12 @@ class GripperShapeScene:
             vR[ax] = +vclose if cRf[ax] > cRo[ax] else -vclose
             posL = list(cLo); posR = list(cRo)
             for i in range(nclose):
-                posL[ax] += vL[ax] * self.dt_ctrl; posR[ax] += vR[ax] * self.dt_ctrl
+                # start-of-tick centre + velocity; the fork advances by dt_ctrl*velocity
+                # over the step, so advance pos AFTER (pre-advancing double-moves it)
                 s.set_box(hL, center=tuple(posL), velocity=tuple(vL))
                 s.set_box(hR, center=tuple(posR), velocity=tuple(vR))
                 s.step(self.dt, substeps=self.sub)
+                posL[ax] += vL[ax] * self.dt_ctrl; posR[ax] += vR[ax] * self.dt_ctrl
             # release: park both fingers away (no drag), settle
             s.set_box(hL, center=self.corner, velocity=(0, 0, 0))
             s.set_box(hR, center=(0.28, 0.02, 0.25), velocity=(0, 0, 0))
@@ -110,10 +112,12 @@ class GripperShapeScene:
             vR[ax] = +vclose if cRf[ax] > cRo[ax] else -vclose
             posL = list(cLo); posR = list(cRo)
             for i in range(nclose):
-                posL[ax] += vL[ax] * self.dt_ctrl; posR[ax] += vR[ax] * self.dt_ctrl
+                # start-of-tick centre + velocity; the fork advances by dt_ctrl*velocity
+                # over the step, so advance pos AFTER (pre-advancing double-moves it)
                 s.set_box(hL, center=tuple(posL), velocity=tuple(vL))
                 s.set_box(hR, center=tuple(posR), velocity=tuple(vR))
                 s.step(self.dt, substeps=self.sub)
+                posL[ax] += vL[ax] * self.dt_ctrl; posR[ax] += vR[ax] * self.dt_ctrl
                 if i % every == 0:
                     frames.append(dict(x=s.x().copy(), boxes=[(tuple(posL), half), (tuple(posR), half)],
                                        label=f"grip {gi+1}/{len(grips)} ({axis}-pinch)"))

@@ -9,7 +9,14 @@ from warpmpm.core.solver import GridConfig, Solver
 from warpmpm.coupling.admittance import ForceAdmittance, Impedance1D
 from warpmpm.coupling.backend import WarpMPMBackend
 from warpmpm.coupling.wrench import box_contact_wrench
-from warpmpm.materials import Material, elastic, granular, newtonian, tabulated_viscous
+from warpmpm.materials import (
+    Material,
+    elastic,
+    granular,
+    newtonian,
+    tabulated_viscous,
+    vonmises,
+)
 from warpmpm.scenes import block, dough
 
 __version__ = "0.0.1"
@@ -28,4 +35,5 @@ __all__ = [
     "granular",
     "newtonian",
     "tabulated_viscous",
+    "vonmises",
 ]

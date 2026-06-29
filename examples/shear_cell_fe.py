@@ -45,7 +45,7 @@ N_GRID = 48
 GRID_LIM = 0.4
 COL_W = 0.12
 COL_H = 0.045
-FE_TABLE = REPO / "out" / "function_encoder" / "fe_viscous_table.npz"
+FE_TABLE = REPO / "mpm_engine" / "fe-weights" / "viscous.npz"
 
 
 def eta_app_true(gd):

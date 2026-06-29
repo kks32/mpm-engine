@@ -12,7 +12,7 @@ from typing import Any
 import numpy as np
 import warp as wp
 
-from warpmpm._vendor import MPM_Simulator_WARP
+from warpmpm.kernels import MPM_Simulator_WARP
 
 _INITED = False
 

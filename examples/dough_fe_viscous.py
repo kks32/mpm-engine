@@ -119,7 +119,7 @@ def viscous_prior(fe, s_grid, n=800, seed=0):
 def run():
     from ident.features.function_encoder import FunctionEncoderDict
     OUT.mkdir(parents=True, exist_ok=True)
-    d = np.load(REPO / "out/function_encoder/fe_viscous_table.npz")
+    d = np.load(REPO / "mpm_engine/fe-weights/viscous.npz")
     fe = FunctionEncoderDict(d["s_grid"], d["table"])     # eta_app basis on s=log10 gd
     speeds = (0.04, 0.08, 0.16)
     A_fe, A_b, bvec, gdp = [], [], [], []

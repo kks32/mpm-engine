@@ -44,7 +44,8 @@ pytest                              # conservation + sanity
 ruff check . && ty check            # lint + types
 ```
 
-The MPM fork is reached via `src/warpmpm/_vendor.py`; set `WARPMPM_FORK` to override its path.
+The Warp MLS-MPM kernels live in-package at `src/warpmpm/kernels/` (solver, constitutive
+kernels, structs); everything imports them from `warpmpm.kernels`. See AUTHORS.md for provenance.
 
 ## Roadmap
 
