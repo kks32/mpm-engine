@@ -15,6 +15,67 @@ MATERIAL_NAME_TO_ID = {
 MAX_MATERIALS = 16
 
 
+@wp.func
+def sdf_trilerp(vals: wp.array(dtype=float, ndim=3), res: int, fidx: wp.vec3):
+    """Trilinear interpolation of a scalar voxel grid at continuous index fidx."""
+    fi = wp.min(wp.max(fidx[0], 0.0), float(res) - 1.0001)
+    fj = wp.min(wp.max(fidx[1], 0.0), float(res) - 1.0001)
+    fk = wp.min(wp.max(fidx[2], 0.0), float(res) - 1.0001)
+    i = int(wp.floor(fi)); j = int(wp.floor(fj)); k = int(wp.floor(fk))
+    tx = fi - float(i); ty = fj - float(j); tz = fk - float(k)
+    c00 = vals[i, j, k] * (1.0 - tx) + vals[i + 1, j, k] * tx
+    c01 = vals[i, j, k + 1] * (1.0 - tx) + vals[i + 1, j, k + 1] * tx
+    c10 = vals[i, j + 1, k] * (1.0 - tx) + vals[i + 1, j + 1, k] * tx
+    c11 = vals[i, j + 1, k + 1] * (1.0 - tx) + vals[i + 1, j + 1, k + 1] * tx
+    c0 = c00 * (1.0 - ty) + c10 * ty
+    c1 = c01 * (1.0 - ty) + c11 * ty
+    return c0 * (1.0 - tz) + c1 * tz
+
+
+@wp.func
+def sdf_trilerp_vec(vals: wp.array(dtype=wp.vec3, ndim=3), res: int, fidx: wp.vec3):
+    """Trilinear interpolation of a vec3 voxel grid (the SDF gradient) at continuous index."""
+    fi = wp.min(wp.max(fidx[0], 0.0), float(res) - 1.0001)
+    fj = wp.min(wp.max(fidx[1], 0.0), float(res) - 1.0001)
+    fk = wp.min(wp.max(fidx[2], 0.0), float(res) - 1.0001)
+    i = int(wp.floor(fi)); j = int(wp.floor(fj)); k = int(wp.floor(fk))
+    tx = fi - float(i); ty = fj - float(j); tz = fk - float(k)
+    c00 = vals[i, j, k] * (1.0 - tx) + vals[i + 1, j, k] * tx
+    c01 = vals[i, j, k + 1] * (1.0 - tx) + vals[i + 1, j, k + 1] * tx
+    c10 = vals[i, j + 1, k] * (1.0 - tx) + vals[i + 1, j + 1, k] * tx
+    c11 = vals[i, j + 1, k + 1] * (1.0 - tx) + vals[i + 1, j + 1, k + 1] * tx
+    c0 = c00 * (1.0 - ty) + c10 * ty
+    c1 = c01 * (1.0 - ty) + c11 * ty
+    return c0 * (1.0 - tz) + c1 * tz
+
+
+def _quat_mul(q1, q2):
+    """Hamilton product of two (x, y, z, w) quaternions (numpy, host side)."""
+    x1, y1, z1, w1 = q1
+    x2, y2, z2, w2 = q2
+    return np.array([
+        w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2,
+        w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2,
+        w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2,
+        w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2,
+    ])
+
+
+def _omega_step_quat(q, omega, dt):
+    """Advance orientation q (body->world, xyzw) by a world-frame angular velocity over dt
+    using the exponential map (exact for constant omega); world omega left-multiplies."""
+    w = np.asarray(omega, dtype=float)
+    speed = float(np.linalg.norm(w))
+    if speed * dt < 1e-12:
+        return q
+    half = 0.5 * speed * dt
+    axis = w / speed
+    dq = np.array([axis[0] * np.sin(half), axis[1] * np.sin(half), axis[2] * np.sin(half),
+                   np.cos(half)])
+    qn = _quat_mul(dq, q)
+    return qn / np.linalg.norm(qn)
+
+
 class MPM_Simulator_WARP:
     def __init__(self, n_particles, n_grid=100, grid_lim=1.0, device="cuda:0"):
         self.initialize(n_particles, n_grid, grid_lim, device=device)
@@ -1517,6 +1578,120 @@ class MPM_Simulator_WARP:
 
         self.grid_postprocess.append(collide)
         self.modify_bc.append(None)
+
+    # A watertight mesh as a moving/rotating signed-distance-field collider. The robot (or a
+    # scripted pour) drives it via set_sdf_pose; the material is blocked from the solid and the
+    # exact reaction wrench (force + torque) is read back from the grid impulse.
+    def add_sdf_collider(self, sdf_values, sdf_grads, origin, cell, center,
+                         quat=(0.0, 0.0, 0.0, 1.0), velocity=(0.0, 0.0, 0.0),
+                         omega=(0.0, 0.0, 0.0), band=None, surface="separable",
+                         friction=0.4, start_time=0.0, end_time=999.0, device="cpu"):
+        res = int(sdf_values.shape[0])
+        if band is None:
+            band = float(self.mpm_model.dx)
+        surface_id = {"sticky": 0, "slip": 1, "separable": 2}[surface]
+
+        param = SDFCollider()
+        param.sdf_val = wp.from_numpy(
+            np.ascontiguousarray(sdf_values, dtype=np.float32), dtype=float, device=device)
+        param.sdf_grad = wp.from_numpy(
+            np.ascontiguousarray(sdf_grads, dtype=np.float32), dtype=wp.vec3, device=device)
+        param.res = res
+        param.origin = wp.vec3(float(origin[0]), float(origin[1]), float(origin[2]))
+        param.cell = float(cell)
+        param.center = wp.vec3(float(center[0]), float(center[1]), float(center[2]))
+        param.quat = wp.quat(float(quat[0]), float(quat[1]), float(quat[2]), float(quat[3]))
+        param.velocity = wp.vec3(float(velocity[0]), float(velocity[1]), float(velocity[2]))
+        param.omega = wp.vec3(float(omega[0]), float(omega[1]), float(omega[2]))
+        param.band = float(band)
+        param.surface_type = surface_id
+        param.friction = float(friction)
+        param.start_time = start_time
+        param.end_time = end_time
+        param.force = wp.zeros(1, dtype=wp.vec3, device=device)
+        param.torque = wp.zeros(1, dtype=wp.vec3, device=device)
+        self.collider_params.append(param)
+
+        @wp.kernel
+        def collide(
+            time: float,
+            dt: float,
+            state: MPMStateStruct,
+            model: MPMModelStruct,
+            param: SDFCollider,
+        ):
+            gx, gy, gz = wp.tid()
+            if time >= param.start_time and time < param.end_time:
+                xw = wp.vec3(float(gx) * model.dx, float(gy) * model.dx, float(gz) * model.dx)
+                rel = xw - param.center
+                body = wp.quat_rotate_inv(param.quat, rel)
+                fidx = wp.vec3(
+                    (body[0] - param.origin[0]) / param.cell,
+                    (body[1] - param.origin[1]) / param.cell,
+                    (body[2] - param.origin[2]) / param.cell,
+                )
+                rf = float(param.res) - 1.0
+                inside_grid = (
+                    fidx[0] >= 0.0 and fidx[1] >= 0.0 and fidx[2] >= 0.0
+                    and fidx[0] <= rf and fidx[1] <= rf and fidx[2] <= rf
+                )
+                if inside_grid:
+                    sd = sdf_trilerp(param.sdf_val, param.res, fidx)
+                    if sd <= param.band:
+                        g = sdf_trilerp_vec(param.sdf_grad, param.res, fidx)
+                        if wp.length(g) > 1.0e-12:
+                            n_world = wp.quat_rotate(param.quat, wp.normalize(g))
+                            v_surf = param.velocity + wp.cross(param.omega, rel)
+                            v_free = state.grid_v_out[gx, gy, gz]
+                            v_rel = v_free - v_surf
+                            vn = wp.dot(v_rel, n_world)
+                            v_new = v_free
+                            if param.surface_type == 0:        # sticky: move with the surface
+                                v_new = v_surf
+                            elif param.surface_type == 1:      # slip: kill normal relative vel
+                                v_new = v_surf + (v_rel - vn * n_world)
+                            else:                              # separable + Coulomb friction
+                                if vn < 0.0:
+                                    v_tan = v_rel - vn * n_world
+                                    tlen = wp.length(v_tan)
+                                    if tlen > 1.0e-12:
+                                        scale = wp.max(0.0, tlen + param.friction * vn) / tlen
+                                        v_tan = v_tan * scale
+                                    v_new = v_surf + v_tan
+                            m = state.grid_m[gx, gy, gz]
+                            impulse = m * (v_free - v_new)
+                            wp.atomic_add(param.force, 0, impulse)
+                            wp.atomic_add(param.torque, 0, wp.cross(rel, impulse))
+                            state.grid_v_out[gx, gy, gz] = v_new
+
+        def modify(time, dt, param: SDFCollider):
+            if time >= param.start_time and time < param.end_time:
+                c = param.center
+                v = param.velocity
+                param.center = wp.vec3(c[0] + dt * v[0], c[1] + dt * v[1], c[2] + dt * v[2])
+                q = np.array([param.quat[0], param.quat[1], param.quat[2], param.quat[3]],
+                             dtype=float)
+                w = np.array([param.omega[0], param.omega[1], param.omega[2]], dtype=float)
+                q = _omega_step_quat(q, w, dt)
+                param.quat = wp.quat(float(q[0]), float(q[1]), float(q[2]), float(q[3]))
+
+        self.grid_postprocess.append(collide)
+        self.modify_bc.append(modify)
+        return len(self.collider_params) - 1
+
+    def set_sdf_pose(self, handle, center=None, quat=None, velocity=None, omega=None):
+        """Command an SDF collider with its START-of-tick pose and per-tick velocity/omega; the
+        modify_bc integrates center += dt*velocity and rotates the quat by omega every substep,
+        mirroring the box-collider contract (drive with v = (target - prev)/dt_ctrl)."""
+        p = self.collider_params[handle]
+        if center is not None:
+            p.center = wp.vec3(float(center[0]), float(center[1]), float(center[2]))
+        if quat is not None:
+            p.quat = wp.quat(float(quat[0]), float(quat[1]), float(quat[2]), float(quat[3]))
+        if velocity is not None:
+            p.velocity = wp.vec3(float(velocity[0]), float(velocity[1]), float(velocity[2]))
+        if omega is not None:
+            p.omega = wp.vec3(float(omega[0]), float(omega[1]), float(omega[2]))
 
     # given normal direction, say [0,0,1]
     # gradually release grid velocities from start position to end position

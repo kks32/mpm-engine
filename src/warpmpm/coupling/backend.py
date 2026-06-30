@@ -31,18 +31,27 @@ class WarpMPMBackend:
     def attach_tool(self, center, half, velocity=(0.0, 0.0, 0.0)) -> int:
         """Add a kinematic box end-effector; returns a tool id."""
         tid = self.solver.add_box(center, half, velocity)
-        self._tools[tid] = {"half": tuple(map(float, half)), "center": tuple(map(float, center))}
+        self._tools[tid] = {"half": tuple(map(float, half)),
+                            "center": tuple(map(float, center)),
+                            "velocity": tuple(map(float, velocity))}
         return tid
 
     def set_tool_kinematics(self, tool_id: int, center, velocity) -> None:
         """Command a tool with its START-of-tick centre and per-tick velocity (the contract
-        in set_box: modify_bc integrates centre -> centre + dt_ctrl*velocity over the step)."""
+        in set_box: modify_bc integrates centre -> centre + dt_ctrl*velocity over the step).
+        step() then advances the cached centre to the post-step position, so get_tool_wrench
+        reads the right centre without an explicit at_center."""
         self.solver.set_box(tool_id, center=center, velocity=velocity)
         self._tools[tool_id]["center"] = tuple(map(float, center))
+        self._tools[tool_id]["velocity"] = tuple(map(float, velocity))
 
     # --- exchange --------------------------------------------------------------------
     def step(self, dt: float, substeps: int = 1) -> None:
         self.solver.step(dt, substeps)
+        dt_ctrl = dt * substeps                  # advance each cached centre to the END-of-tick
+        for t in self._tools.values():           # position the fork integrated the collider to
+            v, c = t.get("velocity", (0.0, 0.0, 0.0)), t["center"]
+            t["center"] = (c[0] + v[0] * dt_ctrl, c[1] + v[1] * dt_ctrl, c[2] + v[2] * dt_ctrl)
 
     def get_tool_wrench(self, tool_id: int, at_center=None, **kw) -> dict:
         """Quasi-STATIC contact wrench from the stress integral over the box, for the force

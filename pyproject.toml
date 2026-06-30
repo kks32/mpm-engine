@@ -4,7 +4,7 @@ version = "0.0.1"
 description = "Fast, modular Warp-MPM engine for robot manipulation of deformable + granular media (dough first, terrain/rovers next). Sparse-grid + implicit, MuJoCo coupling, Isaac-ready."
 requires-python = ">=3.12,<3.13"
 dependencies = [
-    "warp-lang>=1.10.1",
+    "warp-lang>=1.14,<2",   # kernels use the post-1.14 API (warp.float32, wp.matrix_from_rows)
     "torch>=2.4",
     "numpy>=1.26",
 ]
@@ -14,8 +14,9 @@ dev = ["pytest>=8.0", "ruff>=0.6", "ty"]
 mujoco = ["mujoco>=3.1", "robot_descriptions>=1.10"]   # FrankaArm loads the Panda from robot_descriptions
 render = ["matplotlib>=3.8", "imageio>=2.34", "imageio-ffmpeg>=0.4.9", "pillow>=10.0"]
 surface = ["scipy>=1.11", "scikit-image>=0.22", "pyvista>=0.43"]   # marching-cubes dough-surface render
+geometry = ["scipy>=1.11", "trimesh>=4.0"]         # mesh->SDF colliders: scipy cKDTree fast path, trimesh mesh IO
 io = ["h5py>=3.10"]                                # optional .h5 particle loader (load_from_sampling)
-all = ["warpmpm[dev,mujoco,render,surface,io]"]    # everything, for a full dev/demo checkout
+all = ["warpmpm[dev,mujoco,render,surface,geometry,io]"]    # everything, for a full dev/demo checkout
 
 [build-system]
 requires = ["hatchling"]
