@@ -705,12 +705,12 @@ def p2g_apic_with_stress(state: MPMStateStruct, model: MPMModelStruct, dt: float
         wa = wp.vec3(1.5) - fx
         wb = fx - wp.vec3(1.0)
         wc = fx - wp.vec3(0.5)
-        w = wp.matrix_from_rows(
+        w = wp.matrix_from_cols(
             wp.cw_mul(wa, wa) * 0.5,
             wp.vec3(0.0, 0.0, 0.0) - wp.cw_mul(wb, wb) + wp.vec3(0.75),
             wp.cw_mul(wc, wc) * 0.5,
         )
-        dw = wp.matrix_from_rows(
+        dw = wp.matrix_from_cols(
             fx - wp.vec3(1.5),
             -2.0 * (fx - wp.vec3(1.0)),
             fx - wp.vec3(0.5),
@@ -780,12 +780,12 @@ def g2p(state: MPMStateStruct, model: MPMModelStruct, dt: float):
         wa = wp.vec3(1.5) - fx
         wb = fx - wp.vec3(1.0)
         wc = fx - wp.vec3(0.5)
-        w = wp.matrix_from_rows(
+        w = wp.matrix_from_cols(
             wp.cw_mul(wa, wa) * 0.5,
             wp.vec3(0.0, 0.0, 0.0) - wp.cw_mul(wb, wb) + wp.vec3(0.75),
             wp.cw_mul(wc, wc) * 0.5,
         )
-        dw = wp.matrix_from_rows(
+        dw = wp.matrix_from_cols(
             fx - wp.vec3(1.5),
             -2.0 * (fx - wp.vec3(1.0)),
             fx - wp.vec3(0.5),
@@ -1078,7 +1078,7 @@ def rigid_g2p_accumulate(
         wa = wp.vec3(1.5) - fx
         wb = fx - wp.vec3(1.0)
         wc = fx - wp.vec3(0.5)
-        w = wp.matrix_from_rows(
+        w = wp.matrix_from_cols(
             wp.cw_mul(wa, wa) * 0.5,
             wp.vec3(0.0, 0.0, 0.0) - wp.cw_mul(wb, wb) + wp.vec3(0.75),
             wp.cw_mul(wc, wc) * 0.5,
