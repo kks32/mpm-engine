@@ -160,7 +160,7 @@ def _setup_camera(arm, look_w, az=130, elev=-12, dist=1.5):
     arm.cam.azimuth = az; arm.cam.elevation = elev; arm.cam.distance = dist
 
 
-def run(n_grid=72, eta=3.0, density=1000.0, bulk=1.5e5, hold_frac=0.30, q5_max=1.75,
+def run(n_grid=72, eta=3.0, density=1000.0, bulk=1.5e5, hold_frac=0.30, q5_max=-2.0,
         settle_s=0.15, pour_s=1.45, drain_s=0.55, dt=1.2e-4, substeps=6, sdf_res=56,
         render_every=4, target_frac=0.6, probe=False, log=print):
     grid = GridConfig(n_grid=n_grid, grid_lim=GRID_LIM)
@@ -181,98 +181,90 @@ def run(n_grid=72, eta=3.0, density=1000.0, bulk=1.5e5, hold_frac=0.30, q5_max=1
     # the handle rod, not the glass body -- the Genesis grasp design, no penetration
     pa = PourArm(hold_frac=hold_frac, q5_max=q5_max, height=600, width=800, hide_gripper=False)
     cup0_w, cupR0, cupq0 = pa.cup_world(0.0)
-    # centre the receiver on the AVERAGE pour-lip position over the active-pour window (the cup
-    # translates as the wrist tilts, so the stream sweeps; averaging the lip centres the catch)
-    th = np.linspace(0, 2 * np.pi, 48)
-
-    def _lip(frac):
-        c, R, _ = pa.cup_world(frac)
-        rim = c + (R @ np.stack([CUP["inner_radius"] * np.cos(th), CUP["inner_radius"] * np.sin(th),
-                                 np.full_like(th, CUP["height"])], 0)).T
-        return rim[np.argmin(rim[:, 2])]
-
-    lips = np.array([_lip(f) for f in np.linspace(0.22, 0.50, 8)])
-    recv_w = np.array([lips[:, 0].mean(), lips[:, 1].mean(), floor_z_w + 0.001])
-    # frame both the (rising) held cup and the receiver
-    cup_top = pa.cup_world(1.0)[0][2] + CUP["height"]
-    look = np.array([0.5 * (cup0_w[0] + recv_w[0]), cup0_w[1], 0.45 * cup_top])
-    _setup_camera(pa.arm, look, az=128, elev=-11, dist=1.45)
-
-    s = Solver(grid=grid, device="cpu")
     fluid_pts, fluid_vol = _fill_cavity(cup0_w, dx, radius=CUP["inner_radius"] - 1.3 * dx,
                                         z_lo=CUP["base_thickness"] + dx, z_hi=0.080)
-    s.load_particles(fluid_pts, fluid_vol)
-    s.set_material(newtonian(eta=eta, density=density, bulk_modulus=bulk))
-    s.add_plane((0, 0, floor_z_m), (0, 0, 1), "slip", friction=0.3)
-    pour_h = s.add_sdf_collider(sdf, center=w2m(cup0_w), quat=cupq0, surface="separable",
-                                friction=0.4)
-    recv_h = s.add_sdf_collider(recv_sdf, center=w2m(recv_w), surface="separable", friction=0.4)
     n_fluid = len(fluid_pts)
-    glass = np.array([0.80, 0.90, 1.0, 0.28], np.float32)   # clearer glass (fluid more visible)
-    fluid_rgba = np.array([0.95, 0.55, 0.15, 1.0], np.float32)   # "orange" held-out colour
-
-    import imageio.v2 as imageio
-    from matplotlib import colormaps
-    tmp = Path(tempfile.mkdtemp())
-    OUT.mkdir(parents=True, exist_ok=True)
-    frames = []
-
-    handle_rgba = np.array([0.55, 0.40, 0.30, 1.0], np.float32)   # wood/metal handle, visible
-
-    def draw(frac, x_mpm, spd):
-        cup_w, cupR, _ = pa.cup_world(frac)
-        hc, hR = pa.handle_world(frac)
-        cyl = [_cup_cylinder(cup_w, cupR, glass),
-               _cup_cylinder(recv_w, np.eye(3), glass, dims=RECV),
-               _handle_cylinder(hc, cupR, handle_rgba)]
-        col = np.tile(fluid_rgba, (len(x_mpm), 1))
-        img = pa.arm.render_with_particles(m2w(x_mpm), col, radius=0.0068,
-                                           table=(cup0_w[0] + 0.05, cup0_w[1], floor_z_w, 0.42),
-                                           cylinders=cyl)
-        fr = tmp / f"f_{len(frames):04d}.png"
-        imageio.imwrite(fr, img); frames.append(1)
-
-    if probe:
-        for frac in (0.0, 0.5, 1.0):
-            pa.arm.set_descent  # keep arm posed via cup_world's _pose
-            pa.cup_world(frac)
-            draw(frac, fluid_pts, np.zeros(n_fluid))
-        for i in range(len(frames)):
-            (OUT / f"probe_{i}.png").write_bytes((tmp / f"f_{i:04d}.png").read_bytes())
-        log(f"[pour_franka] wrote {len(frames)} probe frames to {OUT}")
-        return
-
+    glass = np.array([0.80, 0.90, 1.0, 0.28], np.float32)         # clearer glass
+    fluid_rgba = np.array([0.95, 0.55, 0.15, 1.0], np.float32)    # "orange" held-out colour
+    handle_rgba = np.array([0.55, 0.40, 0.30, 1.0], np.float32)
     n_settle = int(settle_s / (dt * substeps))
     n_pour = int(pour_s / (dt * substeps))
     n_drain = int(drain_s / (dt * substeps))
-    total = n_settle + n_pour + n_drain
-    tick = 0
 
-    def drive_and_step(frac):
-        cup_w, _, cupq = pa.cup_world(frac)
-        s.set_sdf_pose(pour_h, center=w2m(cup_w), quat=cupq)
-        s.step(dt, substeps)
+    import imageio.v2 as imageio
 
-    for _ in range(n_settle):
-        drive_and_step(0.0); tick += 1
-        if tick % render_every == 0:
-            draw(0.0, s.x(), np.linalg.norm(s.v(), axis=1))
-    for k in range(n_pour):
-        frac = (k + 1) / n_pour
-        drive_and_step(frac); tick += 1
-        if np.isnan(s.x()).any():
-            log(f"[pour_franka] NaN at tick {tick}; stopping"); break
-        if tick % render_every == 0:
-            draw(frac, s.x(), np.linalg.norm(s.v(), axis=1))
-    for _ in range(n_drain):
-        drive_and_step(1.0); tick += 1
-        if tick % render_every == 0:
-            draw(1.0, s.x(), np.linalg.norm(s.v(), axis=1))
+    def simulate(recv_w, do_render, tmp=None):
+        """One full pour with the receiver at recv_w; returns final world positions. Renders
+        frames into tmp when do_render (the receiver bowl is drawn at recv_w)."""
+        s = Solver(grid=grid, device="cpu").load_particles(fluid_pts, fluid_vol)
+        s.set_material(newtonian(eta=eta, density=density, bulk_modulus=bulk))
+        s.add_plane((0, 0, floor_z_m), (0, 0, 1), "slip", friction=0.3)
+        pour_h = s.add_sdf_collider(sdf, center=w2m(cup0_w), quat=cupq0, surface="separable",
+                                    friction=0.4)
+        s.add_sdf_collider(recv_sdf, center=w2m(recv_w), surface="separable", friction=0.4)
+        frames = []
 
-    xf_w = m2w(s.x())
+        def draw(frac):
+            cup_w, cupR, _ = pa.cup_world(frac)
+            hc, _ = pa.handle_world(frac)
+            cyl = [_cup_cylinder(cup_w, cupR, glass),
+                   _cup_cylinder(recv_w, np.eye(3), glass, dims=RECV),
+                   _handle_cylinder(hc, cupR, handle_rgba)]
+            col = np.tile(fluid_rgba, (n_fluid, 1))
+            img = pa.arm.render_with_particles(m2w(s.x()), col, radius=0.0068,
+                                               table=(cup0_w[0] + 0.05, cup0_w[1], floor_z_w, 0.42),
+                                               cylinders=cyl)
+            imageio.imwrite(tmp / f"f_{len(frames):04d}.png", img); frames.append(1)
+
+        tick = 0
+        for phase, nph in (("settle", n_settle), ("pour", n_pour), ("drain", n_drain)):
+            for k in range(nph):
+                frac = 0.0 if phase == "settle" else (1.0 if phase == "drain"
+                                                      else (k + 1) / n_pour)
+                cup_w, _, cupq = pa.cup_world(frac)
+                s.set_sdf_pose(pour_h, center=w2m(cup_w), quat=cupq)
+                s.step(dt, substeps); tick += 1
+                if np.isnan(s.x()).any():
+                    log(f"[pour_franka] NaN at tick {tick}; stopping"); break
+                if do_render and tick % render_every == 0:
+                    draw(frac)
+        return m2w(s.x()), frames, s.inverted_count()
+
+    if probe:
+        tmp = Path(tempfile.mkdtemp()); OUT.mkdir(parents=True, exist_ok=True)
+        for i, frac in enumerate((0.0, 0.5, 1.0)):
+            cup_w, cupR, _ = pa.cup_world(frac); hc, _ = pa.handle_world(frac)
+            cyl = [_cup_cylinder(cup_w, cupR, glass), _handle_cylinder(hc, cupR, handle_rgba)]
+            img = pa.arm.render_with_particles(m2w(fluid_pts), np.tile(fluid_rgba, (n_fluid, 1)),
+                                               radius=0.0068,
+                                               table=(cup0_w[0] + 0.05, cup0_w[1], floor_z_w, 0.42),
+                                               cylinders=cyl)
+            imageio.imwrite(OUT / f"probe_{i}.png", img)
+        log(f"[pour_franka] wrote 3 probe frames to {OUT}")
+        return
+
+    # PASS 1 (no render): park the receiver far away so the fluid falls to the floor, then use
+    # the median landing point of the poured fluid as the true catch location (deterministic,
+    # vs guessing the sweeping lip). PASS 2 places the bowl there and renders.
+    recv_far = np.array([cup0_w[0], cup0_w[1] + 0.4, floor_z_w + 0.001])
+    xf1, _, _ = simulate(recv_far, do_render=False)
+    landed = xf1[xf1[:, 2] < floor_z_w + 0.06]
+    if len(landed) < 30:
+        landed = xf1
+    recv_w = np.array([float(np.median(landed[:, 0])), float(np.median(landed[:, 1])),
+                       floor_z_w + 0.001])
+    log(f"[pour_franka] located landing -> receiver at "
+        f"({recv_w[0]:.3f},{recv_w[1]:.3f}); {len(landed)}/{n_fluid} on floor")
+
+    cup_top = pa.cup_world(1.0)[0][2] + CUP["height"]
+    look = np.array([0.5 * (cup0_w[0] + recv_w[0]), 0.5 * (cup0_w[1] + recv_w[1]), 0.45 * cup_top])
+    _setup_camera(pa.arm, look, az=128, elev=-11, dist=1.5)
+
+    tmp = Path(tempfile.mkdtemp()); OUT.mkdir(parents=True, exist_ok=True)
+    xf_w, frames, inv = simulate(recv_w, do_render=True, tmp=tmp)
     in_bowl = int(((np.hypot(xf_w[:, 0] - recv_w[0], xf_w[:, 1] - recv_w[1]) < RECV["inner_radius"])
                    & (xf_w[:, 2] < floor_z_w + RECV["height"])).sum())
-    log(f"[pour_franka] frames={len(frames)} fluid={n_fluid} inverted={s.inverted_count()} "
+    log(f"[pour_franka] frames={len(frames)} fluid={n_fluid} inverted={inv} "
         f"caught in receiver bowl: {in_bowl}/{n_fluid} ({100 * in_bowl / n_fluid:.0f}%)")
     mp4 = OUT / "pour_franka.mp4"
     subprocess.run(["ffmpeg", "-y", "-framerate", "20", "-i", str(tmp / "f_%04d.png"),
