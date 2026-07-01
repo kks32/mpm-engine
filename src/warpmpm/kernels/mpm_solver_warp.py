@@ -1,4 +1,5 @@
 import os
+import warnings
 
 import numpy as np
 
@@ -1591,6 +1592,35 @@ class MPM_Simulator_WARP:
             band = float(self.mpm_model.dx)
         surface_id = {"sticky": 0, "slip": 1, "separable": 2}[surface]
 
+        # Containment guard: the collide kernel only queries nodes whose body-frame position
+        # falls inside the SDF grid box, so every point within `band` of the mesh surface must
+        # lie inside that box. The minimum stored SDF value on the box's six faces IS the
+        # worst-case surface-to-box-edge margin; if band reaches it, a shell of near-surface
+        # space outside the box gets no constraint and the material can leak through unseen.
+        vals_np = np.asarray(sdf_values)
+        boundary_min = float(min(vals_np[0].min(), vals_np[-1].min(),
+                                 vals_np[:, 0, :].min(), vals_np[:, -1, :].min(),
+                                 vals_np[:, :, 0].min(), vals_np[:, :, -1].min()))
+        if band >= boundary_min:
+            raise ValueError(
+                f"SDF collider contact band ({band * 1e3:.1f} mm) reaches or exceeds the SDF "
+                f"grid margin ({boundary_min * 1e3:.1f} mm): near-surface space outside the "
+                f"stored grid would get no collision. Rebuild the SDF with more margin_cells "
+                f"or reduce band.")
+
+        # Tunneling guard data: the largest body-frame lever arm from the pivot (body origin)
+        # to any corner of the SDF box bounds the surface speed |v| + |omega| * r_max.
+        ext = (res - 1) * float(cell)
+        _corners = np.array([[float(origin[0]) + dx_ * ext,
+                              float(origin[1]) + dy_ * ext,
+                              float(origin[2]) + dz_ * ext]
+                             for dx_ in (0, 1) for dy_ in (0, 1) for dz_ in (0, 1)])
+        r_max = float(np.linalg.norm(_corners, axis=1).max())
+        if not hasattr(self, "_sdf_guard"):
+            self._sdf_guard = {}
+        self._sdf_guard[len(self.collider_params)] = {"r_max": r_max, "band": float(band),
+                                                      "warned": False}
+
         param = SDFCollider()
         param.sdf_val = wp.from_numpy(
             np.ascontiguousarray(sdf_values, dtype=np.float32), dtype=float, device=device)
@@ -1664,14 +1694,27 @@ class MPM_Simulator_WARP:
                             wp.atomic_add(param.torque, 0, wp.cross(rel, impulse))
                             state.grid_v_out[gx, gy, gz] = v_new
 
+        guard = self._sdf_guard[len(self.collider_params) - 1]
+
         def modify(time, dt, param: SDFCollider):
             if time >= param.start_time and time < param.end_time:
                 c = param.center
                 v = param.velocity
+                w = np.array([param.omega[0], param.omega[1], param.omega[2]], dtype=float)
+                # tunneling guard: per-substep surface sweep must stay inside the contact band
+                # or a node can jump from outside the band to inside the solid unconstrained
+                speed = float(np.hypot(np.hypot(v[0], v[1]), v[2])) \
+                    + float(np.linalg.norm(w)) * guard["r_max"]
+                if speed * dt > guard["band"] and not guard["warned"]:
+                    guard["warned"] = True
+                    warnings.warn(
+                        f"SDF collider surface sweeps {speed * dt * 1e3:.2f} mm per substep, "
+                        f"more than the contact band ({guard['band'] * 1e3:.2f} mm): fast "
+                        f"material can tunnel through. Reduce dt, velocity/omega, or raise "
+                        f"band (and the SDF margin).", RuntimeWarning, stacklevel=2)
                 param.center = wp.vec3(c[0] + dt * v[0], c[1] + dt * v[1], c[2] + dt * v[2])
                 q = np.array([param.quat[0], param.quat[1], param.quat[2], param.quat[3]],
                              dtype=float)
-                w = np.array([param.omega[0], param.omega[1], param.omega[2]], dtype=float)
                 q = _omega_step_quat(q, w, dt)
                 param.quat = wp.quat(float(q[0]), float(q[1]), float(q[2]), float(q[3]))
 
@@ -1682,8 +1725,30 @@ class MPM_Simulator_WARP:
     def set_sdf_pose(self, handle, center=None, quat=None, velocity=None, omega=None):
         """Command an SDF collider with its START-of-tick pose and per-tick velocity/omega; the
         modify_bc integrates center += dt*velocity and rotates the quat by omega every substep,
-        mirroring the box-collider contract (drive with v = (target - prev)/dt_ctrl)."""
+        mirroring the box-collider contract (drive with v = (target - prev)/dt_ctrl). Setting
+        center/quat directly teleports the collider between ticks; a jump whose surface sweep
+        exceeds the contact band can tunnel through material, so it warns once."""
         p = self.collider_params[handle]
+        guard = getattr(self, "_sdf_guard", {}).get(handle)
+        if guard is not None and not guard["warned"]:
+            jump = 0.0
+            if center is not None:
+                jump += float(np.linalg.norm(
+                    np.array([float(center[0]) - p.center[0],
+                              float(center[1]) - p.center[1],
+                              float(center[2]) - p.center[2]])))
+            if quat is not None:
+                dot = abs(float(quat[0]) * p.quat[0] + float(quat[1]) * p.quat[1]
+                          + float(quat[2]) * p.quat[2] + float(quat[3]) * p.quat[3])
+                jump += 2.0 * float(np.arccos(min(1.0, dot))) * guard["r_max"]
+            if jump > guard["band"]:
+                guard["warned"] = True
+                warnings.warn(
+                    f"set_sdf_pose jumped the collider surface by up to {jump * 1e3:.2f} mm in "
+                    f"one tick, more than the contact band ({guard['band'] * 1e3:.2f} mm): "
+                    f"material inside the swept region can be tunnelled through. Drive the pose "
+                    f"in smaller per-tick steps (or via velocity/omega).",
+                    RuntimeWarning, stacklevel=2)
         if center is not None:
             p.center = wp.vec3(float(center[0]), float(center[1]), float(center[2]))
         if quat is not None:

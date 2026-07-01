@@ -4,7 +4,11 @@ version = "0.0.1"
 description = "Fast, modular Warp-MPM engine for robot manipulation of deformable + granular media (dough first, terrain/rovers next). Sparse-grid + implicit, MuJoCo coupling, Isaac-ready."
 requires-python = ">=3.12,<3.13"
 dependencies = [
-    "warp-lang>=1.14,<2",   # kernels use the post-1.14 API (warp.float32, wp.matrix_from_rows)
+    # kernels use the API subset common to warp 1.10.1 through 1.14+: public warp.float32/
+    # int32/array (the warp.types.* aliases were removed in 1.14) and wp.matrix_from_cols
+    # (the vec-arg wp.mat33 constructor was removed in 1.14). 1.10.1 is the tested floor;
+    # both the engine venv (1.14) and the project venv (1.10.1) run these kernels.
+    "warp-lang>=1.10.1,<2",
     "torch>=2.4",
     "numpy>=1.26",
 ]

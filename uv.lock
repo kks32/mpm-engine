@@ -362,6 +362,15 @@ wheels = [
 ]
 
 [[package]]
+name = "joblib"
+version = "1.5.3"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/41/f2/d34e8b3a08a9cc79a50b2208a93dce981fe615b64d5a4d4abee421d898df/joblib-1.5.3.tar.gz", hash = "sha256:8561a3269e6801106863fd0d6d84bb737be9e7631e33aaed3fb9ce5953688da3", size = 331603, upload-time = "2025-12-15T08:41:46.427Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/7b/91/984aca2ec129e2757d1e4e3c81c3fcda9d0f85b74670a094cc443d9ee949/joblib-1.5.3-py3-none-any.whl", hash = "sha256:5fc3c5039fc5ca8c0276333a188bbd59d6b7ab37fe6632daa76bc7f9ec18e713", size = 309071, upload-time = "2025-12-15T08:41:44.973Z" },
+]
+
+[[package]]
 name = "kiwisolver"
 version = "1.5.0"
 source = { registry = "https://pypi.org/simple" }
@@ -673,6 +682,26 @@ source = { registry = "https://pypi.org/simple" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/c2/f3/d86c845465a2723ad7e1e5c36dcd75ddb82898b3f53be47ebd429fb2fa5d/nvidia_nvtx-13.0.85-py3-none-manylinux1_x86_64.manylinux_2_5_x86_64.whl", hash = "sha256:4936d1d6780fbe68db454f5e72a42ff64d1fd6397df9f363ae786930fd5c1cd4", size = 148047, upload-time = "2025-09-04T08:29:01.761Z" },
     { url = "https://files.pythonhosted.org/packages/a8/64/3708a90d1ebe202ffdeb7185f878a3c84d15c2b2c31858da2ce0583e2def/nvidia_nvtx-13.0.85-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:cb7780edb6b14107373c835bf8b72e7a178bac7367e23da7acb108f973f157a6", size = 148878, upload-time = "2025-09-04T08:28:53.627Z" },
+]
+
+[[package]]
+name = "osqp"
+version = "1.1.3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "jinja2" },
+    { name = "joblib" },
+    { name = "numpy" },
+    { name = "scipy" },
+    { name = "setuptools" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/b0/7f/b441062e4766851fdf1d066857134c4c3bcf7e0089e4a1d007b6114cecd5/osqp-1.1.3.tar.gz", hash = "sha256:48f53ef5ec89e6ce99ffa955bc6ea0cf2eec09ea3d40905f0c9fadc939609907", size = 57816, upload-time = "2026-06-12T16:59:27.208Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/49/d2/f21ddf1b41ecc14784186129125c4e9c19d8f6f7ade0f2e0efd4a44dded6/osqp-1.1.3-cp312-cp312-macosx_10_13_x86_64.whl", hash = "sha256:2b59e8094fe29d928d568cad0156a42daa44257ce142fb7808400016a62dc28c", size = 328512, upload-time = "2026-06-12T16:58:49.796Z" },
+    { url = "https://files.pythonhosted.org/packages/de/45/1f99a9f25dc9534323b8ef9e578dc93acb33e2b762d5be267e1380b2dda5/osqp-1.1.3-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:e5620abbdb259190da6f0e5421b9fdfd9386b46690210ce82aea6102cc85c67f", size = 308891, upload-time = "2026-06-12T16:58:51.07Z" },
+    { url = "https://files.pythonhosted.org/packages/d5/25/176dbb33c3c3605367c0de8720945c6bdd8f9b0d411e0a94ef747085f034/osqp-1.1.3-cp312-cp312-manylinux_2_24_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:e44ad08234cfbd6d9f2a823118547e683b038676887e096533935b9fcc15fd3c", size = 328135, upload-time = "2026-06-12T16:58:52.185Z" },
+    { url = "https://files.pythonhosted.org/packages/77/89/96e2e4de3b89e7363931c70eb58bded22656f5512bde18eb7a9272ce48d8/osqp-1.1.3-cp312-cp312-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:6ceef7fb4f332892b6e0bbc17323d5c9e028c3f9db726b62a15d876d0f81cc06", size = 354077, upload-time = "2026-06-12T16:58:53.379Z" },
+    { url = "https://files.pythonhosted.org/packages/c4/4b/6a1e4f5aa28117bc0a78be5e9f4071b6a11c00a33a01bc673c3faf2a0a65/osqp-1.1.3-cp312-cp312-win_amd64.whl", hash = "sha256:e7e9bd3939e47e726673218a7b04b9784ecbf9ef0b8bc69107d20cc659836ac1", size = 316733, upload-time = "2026-06-12T16:58:54.397Z" },
 ]
 
 [[package]]
@@ -1145,6 +1174,7 @@ all = [
     { name = "imageio-ffmpeg" },
     { name = "matplotlib" },
     { name = "mujoco" },
+    { name = "osqp" },
     { name = "pillow" },
     { name = "pytest" },
     { name = "pyvista" },
@@ -1163,6 +1193,11 @@ dev = [
 geometry = [
     { name = "scipy" },
     { name = "trimesh" },
+]
+ident = [
+    { name = "matplotlib" },
+    { name = "osqp" },
+    { name = "scipy" },
 ]
 io = [
     { name = "h5py" },
@@ -1188,9 +1223,11 @@ requires-dist = [
     { name = "h5py", marker = "extra == 'io'", specifier = ">=3.10" },
     { name = "imageio", marker = "extra == 'render'", specifier = ">=2.34" },
     { name = "imageio-ffmpeg", marker = "extra == 'render'", specifier = ">=0.4.9" },
+    { name = "matplotlib", marker = "extra == 'ident'", specifier = ">=3.8" },
     { name = "matplotlib", marker = "extra == 'render'", specifier = ">=3.8" },
     { name = "mujoco", marker = "extra == 'mujoco'", specifier = ">=3.1" },
     { name = "numpy", specifier = ">=1.26" },
+    { name = "osqp", marker = "extra == 'ident'", specifier = ">=0.6" },
     { name = "pillow", marker = "extra == 'render'", specifier = ">=10.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "pyvista", marker = "extra == 'surface'", specifier = ">=0.43" },
@@ -1198,14 +1235,15 @@ requires-dist = [
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.6" },
     { name = "scikit-image", marker = "extra == 'surface'", specifier = ">=0.22" },
     { name = "scipy", marker = "extra == 'geometry'", specifier = ">=1.11" },
+    { name = "scipy", marker = "extra == 'ident'", specifier = ">=1.11" },
     { name = "scipy", marker = "extra == 'surface'", specifier = ">=1.11" },
     { name = "torch", specifier = ">=2.4" },
     { name = "trimesh", marker = "extra == 'geometry'", specifier = ">=4.0" },
     { name = "ty", marker = "extra == 'dev'" },
-    { name = "warp-lang", specifier = ">=1.14,<2" },
-    { name = "warpmpm", extras = ["dev", "mujoco", "render", "surface", "geometry", "io"], marker = "extra == 'all'" },
+    { name = "warp-lang", specifier = ">=1.10.1,<2" },
+    { name = "warpmpm", extras = ["dev", "mujoco", "render", "surface", "geometry", "ident", "io"], marker = "extra == 'all'" },
 ]
-provides-extras = ["dev", "mujoco", "render", "surface", "geometry", "io", "all"]
+provides-extras = ["dev", "mujoco", "render", "surface", "geometry", "ident", "io", "all"]
 
 [[package]]
 name = "zipp"

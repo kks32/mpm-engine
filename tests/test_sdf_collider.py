@@ -10,6 +10,7 @@ from __future__ import annotations
 import functools
 
 import numpy as np
+import pytest
 
 from warpmpm import GridConfig, Solver
 from warpmpm.geometry import build_sdf, make_cup_mesh
@@ -95,3 +96,31 @@ def test_tilt_carries_fluid():
     assert mean_x_after - mean_x_before > 0.004, (
         f"rotating cup did not carry the fluid: dx={mean_x_after - mean_x_before:.4f}")
     assert s.inverted_count() == 0
+
+
+def test_band_exceeding_sdf_margin_raises():
+    # a contact band wider than the SDF grid margin leaves near-surface space unqueried
+    # (silent leak-through); the collider must reject it up front
+    grid = GridConfig(n_grid=48, grid_lim=0.4)
+    sdf = _cup_sdf()
+    center = np.array([0.2, 0.2, 0.06])
+    pts, vol = _fill_cavity(center, grid.dx, radius=0.01, z_lo=0.02, z_hi=0.03)
+    s = Solver(grid=grid, device="cpu").load_particles(pts, vol)
+    s.set_material(newtonian(eta=5.0, density=1000.0, bulk_modulus=5.0e5))
+    with pytest.raises(ValueError, match="margin"):
+        s.add_sdf_collider(sdf, center=center, band=0.05)   # 50 mm band vs ~10 mm margin
+
+
+def test_pose_jump_beyond_band_warns():
+    # teleporting the collider farther than the band in one tick can tunnel through material
+    s, h, center, _ = _cup_solver()
+    with pytest.warns(RuntimeWarning, match="tunnel"):
+        s.set_sdf_pose(h, center=(center[0] + 0.1, center[1], center[2]))
+
+
+def test_velocity_tunneling_warns():
+    # a commanded velocity whose per-substep sweep exceeds the band must warn
+    s, h, _, _ = _cup_solver()
+    s.set_sdf_pose(h, velocity=(50.0, 0.0, 0.0))   # 50 m/s * 2e-4 s = 10 mm > ~8.3 mm band
+    with pytest.warns(RuntimeWarning, match="tunnel"):
+        s.step(2.0e-4, substeps=1)

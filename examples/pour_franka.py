@@ -170,7 +170,9 @@ def run(n_grid=72, eta=3.0, density=1000.0, bulk=1.5e5, hold_frac=0.30, q5_max=-
 
     cv, cf = make_cup_mesh(n_theta=56, **CUP)
     probe_pt = np.array([CUP["inner_radius"] + 0.5 * CUP["wall_thickness"], 0.0, 0.04])
-    sdf = build_sdf_cached(cv, cf, res=sdf_res, margin_cells=4, interior_probe=probe_pt,
+    # margin_cells=6: the SDF box margin must exceed the contact band (~grid dx, 9.7 mm at
+    # n_grid=72); at 4 cells the cup's margin is ~8.9 mm and the collider guard rejects it
+    sdf = build_sdf_cached(cv, cf, res=sdf_res, margin_cells=6, interior_probe=probe_pt,
                            cache_dir=CACHE)
     rcv, rcf = make_cup_mesh(n_theta=56, **RECV)
     recv_probe = np.array([RECV["inner_radius"] + 0.5 * RECV["wall_thickness"], 0.0, 0.03])
