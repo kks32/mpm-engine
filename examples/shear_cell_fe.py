@@ -22,6 +22,7 @@ Run:  PYTHONPATH=src ../.venv/bin/python examples/shear_cell_fe.py          # fu
 """
 from __future__ import annotations
 
+import argparse
 import sys
 import time
 from pathlib import Path
@@ -78,7 +79,8 @@ def _build_slab(grid: GridConfig):
 
 
 def shear_segment(v_shear, material, n_frames, dt=1.0e-4, substeps=20,
-                  record_power=False, record_pos=False, record_stress=False):
+                  record_power=False, record_pos=False, record_stress=False,
+                  device="auto"):
     """Run one shear-cell segment with `material` at top-wall speed v_shear.
 
     Returns dict: t[], Fx[], Fz[], gd_pct[] and, if record_power, per-frame v/L/vol/KE for the
@@ -86,7 +88,7 @@ def shear_segment(v_shear, material, n_frames, dt=1.0e-4, substeps=20,
     if record_stress, per-frame per-particle (gd, vol, sigma_dev:D_dev) for the STRONG form."""
     grid = GridConfig(n_grid=N_GRID, grid_lim=GRID_LIM)
     pos, vol0, floor, slab, cx, cy = _build_slab(grid)
-    s = Solver(grid=grid).load_particles(pos, vol0)
+    s = Solver(grid=grid, device=device).load_particles(pos, vol0)
     s.set_material(material)
     s.add_plane((0, 0, floor), (0, 0, 1), "sticky")                  # no-slip floor
     s.add_plane((0, cy - 0.5 * slab, 0), (0, 1, 0), "slip")          # plane strain (y)
@@ -210,7 +212,8 @@ def viscous_prior(fe, s_grid, n=800, seed=0):
     return tbar, cov
 
 
-def run(speeds=(0.006, 0.012, 0.025, 0.05, 0.1, 0.2, 0.4, 0.8), v_holdout=0.16, rho=0.1):
+def run(speeds=(0.006, 0.012, 0.025, 0.05, 0.1, 0.2, 0.4, 0.8), v_holdout=0.16,
+        rho=0.1, device="auto"):
     from ident.features.function_encoder import FunctionEncoderDict
     from ident.solve.qp import constrained_solve
     OUT.mkdir(parents=True, exist_ok=True)
@@ -227,7 +230,8 @@ def run(speeds=(0.006, 0.012, 0.025, 0.05, 0.1, 0.2, 0.4, 0.8), v_holdout=0.16, 
     t0 = time.time()
     for vp in speeds:
         nf = int(np.clip(round(0.4 * COL_W / (vp * fdt)), 40, 160))
-        seg = shear_segment(vp, _truth_material(), n_frames=nf, record_power=True)
+        seg = shear_segment(vp, _truth_material(), n_frames=nf, record_power=True,
+                            device=device)
         a, b2, bb, gd, w = _power_rows(seg, fe)
         A_fe.append(a); A_b.append(b2); bvec.append(bb)
         order = np.argsort(gd)                  # weight w must follow gd's ordering
@@ -302,7 +306,8 @@ def run(speeds=(0.006, 0.012, 0.025, 0.05, 0.1, 0.2, 0.4, 0.8), v_holdout=0.16, 
     print(f"\n  held-out ROLLOUT at v={v_holdout} m/s (NOT in the training sweep) -- the")
     print("  self-consistent test (sim -> learn -> re-sim); relL2 of the predicted dynamics:")
     nf_h = int(np.clip(round(0.4 * COL_W / (v_holdout * fdt)), 60, 160))
-    roll = {tag: shear_segment(v_holdout, mat, n_frames=nf_h, record_pos=True)
+    roll = {tag: shear_segment(v_holdout, mat, n_frames=nf_h, record_pos=True,
+                               device=device)
             for tag, mat in mats.items()}
     tF = roll["truth"]["Fx"]
     m0 = max(3, int(0.2 * len(tF)))
@@ -330,7 +335,7 @@ def run(speeds=(0.006, 0.012, 0.025, 0.05, 0.1, 0.2, 0.4, 0.8), v_holdout=0.16, 
     _figure(gg, eta_tr, eta_bg, eta_fe0, eta_fe, r_bg, r_fe0, r_fe, (gd_lo, gd_hi),
             roll, tF, m0, fr, zc, profs, dr, v_holdout)
     return {"r_fe": r_fe, "r_fe0": r_fe0, "r_bg": r_bg, "force_roll": fr, "deform_roll": dr,
-            "band": (gd_lo, gd_hi)}
+            "band": (gd_lo, gd_hi), "device": device}
 
 
 def replot():
@@ -359,11 +364,11 @@ def _shear_profile(seg, nbins=12):
     return prof, zc
 
 
-def probe():
+def probe(device="auto"):
     t0 = time.time()
     mat = (newtonian(eta=TRUTH["eta"], density=RHO, bulk_modulus=9.0e5)
            .with_yield(TRUTH["tau_y"]).with_powerlaw(K=TRUTH["pk"], n=TRUTH["pn"]))
-    res = shear_segment(0.1, mat, n_frames=80, record_power=True)
+    res = shear_segment(0.1, mat, n_frames=80, record_power=True, device=device)
     gd = res["gd_pct"]
     print(f"probe v=0.1: {len(res['t'])} frames in {time.time()-t0:.1f}s")
     print(f"  Fx range [{res['Fx'].min():.3f},{res['Fx'].max():.3f}]  "
@@ -435,9 +440,13 @@ def _figure(gg, eta_tr, eta_bg, eta_fe0, eta_fe, r_bg, r_fe0, r_fe, band,
 
 if __name__ == "__main__":
     OUT.mkdir(parents=True, exist_ok=True)
-    if len(sys.argv) > 1 and sys.argv[1] == "probe":
-        probe()
-    elif len(sys.argv) > 1 and sys.argv[1] == "replot":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("which", nargs="?", default="run", choices=("run", "probe", "replot"))
+    parser.add_argument("--device", default="cuda:0", help="Warp MPM device, e.g. cuda:0 or cuda:1")
+    args = parser.parse_args()
+    if args.which == "probe":
+        probe(device=args.device)
+    elif args.which == "replot":
         replot()
     else:
-        run()
+        run(device=args.device)

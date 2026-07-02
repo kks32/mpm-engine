@@ -21,6 +21,7 @@ Run:  ../.venv/bin/python examples/vonmises_identify.py
 """
 from __future__ import annotations
 
+import argparse
 import json
 from pathlib import Path
 
@@ -49,14 +50,14 @@ def _dev(T):
 
 def probe(G_true_E=5e5, nu=0.30, yield_true=3000.0, density=1000.0, bulk=9e5,
           n_grid=32, ppc=2, v_plate=0.08, n_frames=220, sub=4, compress=0.014,
-          size=(0.12, 0.08, 0.06)):
+          size=(0.12, 0.08, 0.06), device="auto"):
     """Run one squeeze probe; return per-frame power-balance quantities. `size` sets the block
     (object instance) -- the identified (G, yield) is a MATERIAL property and must not depend on it."""
     g = GridConfig(n_grid=n_grid, grid_lim=0.30)
     pos, vol0, floor = block(g, size=size, center=(0.15, 0.15, 0.05), ppc=ppc)
     N = len(pos); m = density * vol0
     dx = g.dx; dt = 2e-4; dt_ctrl = dt * sub
-    s = Solver(g).load_particles(pos, vol0).set_material(
+    s = Solver(g, device=device).load_particles(pos, vol0).set_material(
         vonmises(E=G_true_E, nu=nu, yield_stress=yield_true, density=density))
     s.add_plane(point=(0, 0, floor), normal=(0, 0, 1), surface="sticky")
     half = (size[0] / 2 + 0.01, size[1] / 2 + 0.01, 2 * dx); ztop = floor + size[2]; zc = ztop + half[2]
@@ -89,7 +90,8 @@ def probe(G_true_E=5e5, nu=0.30, yield_true=3000.0, density=1000.0, bulk=9e5,
     for k in rec:
         rec[k] = np.array(rec[k])
     rec["_meta"] = dict(N=N, z0=z0, G_true=G_true_E / (2 * (1 + nu)), yield_true=yield_true,
-                        E_true=G_true_E, nu=nu, v_plate=v_plate, npress=npress, dt_ctrl=dt_ctrl)
+                        E_true=G_true_E, nu=nu, v_plate=v_plate, npress=npress,
+                        dt_ctrl=dt_ctrl, device=device)
     return rec
 
 
@@ -117,9 +119,9 @@ def identify(rec, elastic_frac=0.06, plastic_frac=0.40):
                 elastic_frames=[0, ne], plastic_frames=[npl0, n])
 
 
-def run():
+def run(device="auto"):
     print("=== #75 force-based von-Mises (G, yield) identification from one squeeze ===", flush=True)
-    rec = probe()
+    rec = probe(device=device)
     meta = rec["_meta"]
     comp = 100 * (meta["z0"] - (meta["z0"] - rec["disp"][-1])) / meta["z0"]
     print(f"probe: N={meta['N']}, {meta['npress']} frames, v_plate={meta['v_plate']} m/s, "
@@ -148,4 +150,7 @@ def run():
 
 
 if __name__ == "__main__":
-    run()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--device", default="auto", help="Warp device: auto (cuda if available), cuda:N, or cpu")
+    args = parser.parse_args()
+    run(device=args.device)

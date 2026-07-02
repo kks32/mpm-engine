@@ -16,6 +16,7 @@ Forces are the Newton-exact grid impulse. Run:
 """
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 
 import numpy as np
@@ -34,13 +35,13 @@ LAWS = {
 
 
 def press_force(tau_y, eta, geom, n_grid=56, v_plate=0.08, press_strain=0.5,
-                dt=1.0e-4, substeps=20, density=1000.0):
+                dt=1.0e-4, substeps=20, density=1000.0, device="auto"):
     """Forward sim: squeeze a dough blob of size `geom` and return (strain%, F_z grid-impulse,
     final 95th-pct radial spread)."""
     grid = GridConfig(n_grid=n_grid, grid_lim=0.4)
     cw, cd, ch = geom
     pos, vol, floor = block(grid, size=geom, ppc=2)
-    s = Solver(grid=grid).load_particles(pos, vol)
+    s = Solver(grid=grid, device=device).load_particles(pos, vol)
     s.set_material(newtonian(eta=eta, density=density, bulk_modulus=9.0e5).with_yield(tau_y))
     s.add_plane((0, 0, floor), (0, 0, 1), "sticky")
     cx = cy = grid.grid_lim * 0.5
@@ -69,12 +70,12 @@ def press_force(tau_y, eta, geom, n_grid=56, v_plate=0.08, press_strain=0.5,
     return np.array(strain), np.array(Fz), spread
 
 
-def run(geom=(0.16, 0.16, 0.06), n_grid=56):
+def run(geom=(0.16, 0.16, 0.06), n_grid=56, device="auto"):
     print(f"unseen volume {geom} (V={np.prod(geom)*1e6:.0f} cm^3) vs identified "
           f"0.12x0.12x0.07 (V={0.12*0.12*0.07*1e6:.0f} cm^3)\n")
     results = {}
     for name, (ty, eta, _c) in LAWS.items():
-        st, Fz, sp = press_force(ty, eta, geom, n_grid=n_grid)
+        st, Fz, sp = press_force(ty, eta, geom, n_grid=n_grid, device=device)
         results[name] = (st, Fz, sp)
         print(f"{name:36s}  F_peak={np.max(np.abs(Fz)):6.1f} N  spread={sp*1e3:5.1f} mm")
 
@@ -113,8 +114,11 @@ def run(geom=(0.16, 0.16, 0.06), n_grid=56):
     p = OUT / "predict_volume_franka.png"
     fig.savefig(p, dpi=130); plt.close(fig)
     print("\nwrote", p)
-    return {"scores": scores, "fig": str(p)}
+    return {"scores": scores, "fig": str(p), "device": device}
 
 
 if __name__ == "__main__":
-    run()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--device", default="auto", help="Warp device: auto (cuda if available), cuda:N, or cpu")
+    args = parser.parse_args()
+    run(device=args.device)

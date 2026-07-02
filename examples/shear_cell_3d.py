@@ -14,6 +14,7 @@ Run:  PYTHONPATH=src ../.venv/bin/python examples/shear_cell_3d.py          # fu
 """
 from __future__ import annotations
 
+import argparse
 import sys
 import time
 from pathlib import Path
@@ -51,14 +52,15 @@ def _build_block(grid: GridConfig):
 
 
 def shear_segment(v_shear, material, n_frames, dt=1.0e-4, substeps=20,
-                  record_power=False, record_traj=False, traj_stride=2, record_stress=False):
+                  record_power=False, record_traj=False, traj_stride=2,
+                  record_stress=False, device="auto"):
     """One 3D shear segment. record_power -> per-frame (diss rows); record_traj -> store
     x[F,N,3], v[F,N,3], times, Fx[F] for rendering; record_stress -> per-frame per-particle
     (gd, vol, sigma_dev:D_dev) for the STRONG-form (pointwise constitutive) recovery."""
     grid = GridConfig(n_grid=N_GRID, grid_lim=GRID_LIM)
     pos, vol0, floor, cx, cy = _build_block(grid)
     _Lx, Ly, Lz = GEOM
-    s = Solver(grid=grid).load_particles(pos, vol0)
+    s = Solver(grid=grid, device=device).load_particles(pos, vol0)
     s.set_material(material)
     s.add_plane((0, 0, floor), (0, 0, 1), "sticky")                  # no-slip floor
     be = WarpMPMBackend(solver=s)
@@ -122,7 +124,8 @@ def _truth_material():
             .with_yield(TRUTH["tau_y"]).with_powerlaw(K=TRUTH["pk"], n=TRUTH["pn"]))
 
 
-def run(speeds=(0.006, 0.012, 0.025, 0.05, 0.1, 0.2, 0.4, 0.8), v_holdout=0.16, rho=0.1):
+def run(speeds=(0.006, 0.012, 0.025, 0.05, 0.1, 0.2, 0.4, 0.8), v_holdout=0.16,
+        rho=0.1, device="auto"):
     from ident.features.function_encoder import FunctionEncoderDict
     from ident.solve.qp import constrained_solve
     OUT.mkdir(parents=True, exist_ok=True)
@@ -134,7 +137,8 @@ def run(speeds=(0.006, 0.012, 0.025, 0.05, 0.1, 0.2, 0.4, 0.8), v_holdout=0.16, 
     t0 = time.time()
     for vp in speeds:
         nf = int(np.clip(round(0.4 * GEOM[0] / (vp * fdt)), 40, 160))
-        seg = shear_segment(vp, _truth_material(), n_frames=nf, record_power=True)
+        seg = shear_segment(vp, _truth_material(), n_frames=nf, record_power=True,
+                            device=device)
         a, b2, bb, gd, w = _power_rows(seg, fe)
         A_fe.append(a)
         A_b.append(b2)
@@ -200,7 +204,8 @@ def run(speeds=(0.006, 0.012, 0.025, 0.05, 0.1, 0.2, 0.4, 0.8), v_holdout=0.16, 
     }
     print(f"\n  held-out 3D ROLLOUT at v={v_holdout} m/s (self-consistent re-sim):")
     nf_h = int(np.clip(round(0.5 * GEOM[0] / (v_holdout * fdt)), 60, 160))
-    roll = {tag: shear_segment(v_holdout, mat, n_frames=nf_h, record_traj=True)
+    roll = {tag: shear_segment(v_holdout, mat, n_frames=nf_h, record_traj=True,
+                               device=device)
             for tag, mat in mats.items()}
     tF = roll["truth"]["Fx"]
     m0 = max(3, int(0.2 * len(tF)))
@@ -222,7 +227,8 @@ def run(speeds=(0.006, 0.012, 0.025, 0.05, 0.1, 0.2, 0.4, 0.8), v_holdout=0.16, 
     np.savez(OUT / "curve_3d.npz", gg=gg, eta_tr=eta_tr, eta_bg=eta_bg, eta_fe0=eta_fe0,
              eta_fe=eta_fe, band=np.array([gd_lo, gd_hi]), r_bg=r_bg, r_fe0=r_fe0, r_fe=r_fe)
     _figure(gg, eta_tr, eta_bg, eta_fe0, r_bg, r_fe0, (gd_lo, gd_hi), roll, tF, m0, fr, v_holdout)
-    return {"r_fe0": r_fe0, "r_bg": r_bg, "force_roll": fr, "band": (gd_lo, gd_hi)}
+    return {"r_fe0": r_fe0, "r_bg": r_bg, "force_roll": fr, "band": (gd_lo, gd_hi),
+            "device": device}
 
 
 def _figure(gg, eta_tr, eta_bg, eta_fe0, r_bg, r_fe0, band, roll, tF, m0, fr, v_holdout):
@@ -284,10 +290,11 @@ def replot():
             float(r["v_holdout"]))
 
 
-def probe():
+def probe(device="auto"):
     OUT.mkdir(parents=True, exist_ok=True)
     t0 = time.time()
-    res = shear_segment(0.1, _truth_material(), n_frames=60, record_power=True)
+    res = shear_segment(0.1, _truth_material(), n_frames=60, record_power=True,
+                        device=device)
     gd = res["gd_pct"]
     grid = GridConfig(n_grid=N_GRID, grid_lim=GRID_LIM)
     pos, *_ = _build_block(grid)
@@ -298,9 +305,13 @@ def probe():
 
 
 if __name__ == "__main__":
-    if len(sys.argv) > 1 and sys.argv[1] == "probe":
-        probe()
-    elif len(sys.argv) > 1 and sys.argv[1] == "replot":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("which", nargs="?", default="run", choices=("run", "probe", "replot"))
+    parser.add_argument("--device", default="cuda:0", help="Warp MPM device, e.g. cuda:0 or cuda:1")
+    args = parser.parse_args()
+    if args.which == "probe":
+        probe(device=args.device)
+    elif args.which == "replot":
         replot()
     else:
-        run()
+        run(device=args.device)

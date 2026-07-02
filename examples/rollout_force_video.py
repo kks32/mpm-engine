@@ -8,6 +8,7 @@ a clean static force graph. Run:  ../.venv/bin/python examples/rollout_force_vid
 """
 from __future__ import annotations
 
+import argparse
 import subprocess
 from pathlib import Path
 
@@ -21,12 +22,12 @@ LAWS = {"truth": (200.0, 40.0), "learned": (192.0, 55.0)}
 
 
 def force_series(tau_y, eta, geom, n_grid=52, v_plate=0.08, press_strain=0.5,
-                 dt=1.0e-4, substeps=20, frame_stride=3):
+                 dt=1.0e-4, substeps=20, frame_stride=3, device="auto"):
     """Re-run the squeeze; record (strain%, grid-impulse |Fz|) at the rendered frames."""
     grid = GridConfig(n_grid=n_grid, grid_lim=0.4)
     cw, cd, ch = geom
     pos, vol, floor = block(grid, size=geom, ppc=2)
-    s = Solver(grid=grid).load_particles(pos, vol)
+    s = Solver(grid=grid, device=device).load_particles(pos, vol)
     s.set_material(newtonian(eta=eta, density=1000.0, bulk_modulus=9.0e5).with_yield(tau_y))
     s.add_plane((0, 0, floor), (0, 0, 1), "sticky")
     cx = cy = grid.grid_lim * 0.5
@@ -54,13 +55,13 @@ def force_series(tau_y, eta, geom, n_grid=52, v_plate=0.08, press_strain=0.5,
     return np.array(strain), np.array(Fz)
 
 
-def run(geom=(0.16, 0.16, 0.06)):
+def run(geom=(0.16, 0.16, 0.06), device="auto"):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     from PIL import Image
-    st_t, F_t = force_series(*LAWS["truth"], geom)
-    st_l, F_l = force_series(*LAWS["learned"], geom)
+    st_t, F_t = force_series(*LAWS["truth"], geom, device=device)
+    st_l, F_l = force_series(*LAWS["learned"], geom, device=device)
     # interp learned onto truth strain for the error number
     F_l_i = np.interp(st_t, st_l, F_l)
     ferr = float(np.linalg.norm(F_l_i - F_t) / max(np.linalg.norm(F_t), 1e-9)) * 100
@@ -112,8 +113,11 @@ def run(geom=(0.16, 0.16, 0.06)):
                     "-c:v", "libx264", "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
                     "-pix_fmt", "yuv420p", str(mp4)], check=True, capture_output=True)
     print("wrote", mp4)
-    return {"force_err_pct": ferr, "video": str(mp4), "graph": str(gpath)}
+    return {"force_err_pct": ferr, "video": str(mp4), "graph": str(gpath), "device": device}
 
 
 if __name__ == "__main__":
-    run()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--device", default="auto", help="Warp device: auto (cuda if available), cuda:N, or cpu")
+    args = parser.parse_args()
+    run(device=args.device)

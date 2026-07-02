@@ -19,6 +19,7 @@ the rheology-dependent signal is the lateral extrusion. This quantifies how well
 """
 from __future__ import annotations
 
+import argparse
 import json
 import subprocess
 import sys
@@ -41,12 +42,12 @@ LAWS = {
 
 
 def squeeze_dump(tau_y, eta, geom, n_grid=52, v_plate=0.08, press_strain=0.5,
-                 dt=1.0e-4, substeps=20, frame_stride=2):
+                 dt=1.0e-4, substeps=20, frame_stride=2, device="auto"):
     """Forward squeeze of a `geom` dough blob; return (X[F,N,3], times) of dough particles."""
     grid = GridConfig(n_grid=n_grid, grid_lim=0.4)
     cw, cd, ch = geom
     pos, vol, floor = block(grid, size=geom, ppc=2)
-    s = Solver(grid=grid).load_particles(pos, vol)
+    s = Solver(grid=grid, device=device).load_particles(pos, vol)
     s.set_material(newtonian(eta=eta, density=1000.0, bulk_modulus=9.0e5).with_yield(tau_y))
     s.add_plane((0, 0, floor), (0, 0, 1), "sticky")
     cx = cy = grid.grid_lim * 0.5
@@ -119,12 +120,13 @@ def render_speckle(X, times, bbox, out_dir, stem, width=520, dot_px=3.2, margin=
     return str(cam)
 
 
-def run(geom=(0.16, 0.16, 0.06), n_grid=52, query_spacing=9):
+def run(geom=(0.16, 0.16, 0.06), n_grid=52, query_spacing=9, device="auto"):
     from perception.track import track as cotracker_track
     OUT.mkdir(parents=True, exist_ok=True)
     print(f"unseen volume {geom} (V={np.prod(geom)*1e6:.0f} cm^3); identified on "
           f"0.12x0.12x0.07.  rendering + CoTracker each law...\n")
-    dumps = {n: squeeze_dump(ty, eta, geom, n_grid=n_grid) for n, (ty, eta) in LAWS.items()}
+    dumps = {n: squeeze_dump(ty, eta, geom, n_grid=n_grid, device=device)
+             for n, (ty, eta) in LAWS.items()}
     allX = np.concatenate([X.reshape(-1, 3) for X, _ in dumps.values()], axis=0)
     m = 0.06
     bbox = (allX[:, 0].min() - m * 0.16, allX[:, 0].max() + m * 0.16,
@@ -157,6 +159,7 @@ def run(geom=(0.16, 0.16, 0.06), n_grid=52, query_spacing=9):
         print(f"  {name:8s}: final {final:5.2f}%   peak {peak:5.2f}%  of dough width")
 
     _figure(dumps, tracks, scores, geom)
+    scores["_device"] = device
     return scores
 
 
@@ -188,4 +191,7 @@ def _figure(dumps, tracks, scores, geom):
 
 
 if __name__ == "__main__":
-    run()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--device", default="cuda:0", help="Warp MPM device, e.g. cuda:0 or cuda:1")
+    args = parser.parse_args()
+    run(device=args.device)

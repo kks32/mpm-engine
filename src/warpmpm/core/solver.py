@@ -1,8 +1,9 @@
-"""CPU-default Solver: a small typed wrapper over the warp-mpm fork.
+"""Device-auto Solver: a small typed wrapper over the warp-mpm fork.
 
-Centralizes device handling (the fork hardcodes cuda in many signatures; on Apple
-Silicon we run CPU), Warp init, and the common load/material/collider/step/export calls,
-so scenes, tests, and the coupling backend never touch the raw fork or sys.path.
+Centralizes device handling, Warp init, and the common load/material/collider/step/export
+calls, so scenes, tests, and the coupling backend never touch the raw fork or sys.path.
+The default ``device="auto"`` resolves to ``cuda:0`` when a CUDA GPU is present and to
+``cpu`` otherwise (Apple Silicon); pass ``device="cuda:1"`` or ``device="cpu"`` to pin.
 """
 from __future__ import annotations
 
@@ -38,10 +39,10 @@ class GridConfig:
 
 @dataclass
 class Solver:
-    """Thin owner of one MPM_Simulator_WARP instance, CPU by default."""
+    """Thin owner of one MPM_Simulator_WARP instance; device resolves at load time."""
 
     grid: GridConfig = field(default_factory=GridConfig)
-    device: str = "cpu"
+    device: str = "auto"
     _sim: Any = field(default=None, init=False, repr=False)
     _step: int = field(default=0, init=False, repr=False)
     _vol0: Any = field(default=None, init=False, repr=False)
@@ -50,6 +51,8 @@ class Solver:
         import torch
 
         _ensure_warp()
+        if self.device == "auto":
+            self.device = "cuda:0" if wp.get_cuda_device_count() > 0 else "cpu"
         self._vol0 = vol.astype(np.float32).copy()
         self._sim = MPM_Simulator_WARP(len(pos), device=self.device)
         self._sim.load_initial_data_from_torch(

@@ -12,6 +12,7 @@ We render the same squeeze both ways, run CoTracker3 on each, and compare tracki
 """
 from __future__ import annotations
 
+import argparse
 import subprocess
 import sys
 from pathlib import Path
@@ -82,12 +83,12 @@ def _cotrack(fdir, spacing=10, device="cpu"):
     return tr[0].cpu().numpy(), vis[0].cpu().numpy()
 
 
-def run(geom=(0.16, 0.16, 0.06), n_grid=52, nframes=22):
+def run(geom=(0.16, 0.16, 0.06), n_grid=52, nframes=22, device="auto"):
     OUT.mkdir(parents=True, exist_ok=True)
     grid = GridConfig(n_grid=n_grid, grid_lim=0.4)
     cw, cd, ch = geom
     pos, vol, floor = block(grid, size=geom, ppc=2)
-    s = Solver(grid=grid).load_particles(pos, vol)
+    s = Solver(grid=grid, device=device).load_particles(pos, vol)
     s.set_material(newtonian(eta=40.0, density=1000.0).with_yield(200.0))
     s.add_plane((0, 0, floor), (0, 0, 1), "sticky")
     cx = cy = grid.grid_lim * 0.5
@@ -158,4 +159,7 @@ def _overlay(res, geom):
 
 
 if __name__ == "__main__":
-    run()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--device", default="cuda:0", help="Warp MPM device, e.g. cuda:0 or cuda:1")
+    args = parser.parse_args()
+    run(device=args.device)

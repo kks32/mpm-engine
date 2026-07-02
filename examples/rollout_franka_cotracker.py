@@ -12,6 +12,7 @@ dough. Run:  ../.venv/bin/python examples/rollout_franka_cotracker.py
 """
 from __future__ import annotations
 
+import argparse
 import subprocess
 import sys
 from pathlib import Path
@@ -56,7 +57,8 @@ def _cotrack(frames_dir, spacing=7, device="cpu"):
 
 
 def squeeze_composite(arm, ee, tau_y, eta, geom, stem, n_grid=52, v_plate=0.08,
-                      press_strain=0.5, dt=1.0e-4, substeps=20, frame_stride=3):
+                      press_strain=0.5, dt=1.0e-4, substeps=20, frame_stride=3,
+                      device="auto"):
     """Run the squeeze for one law and render the composite (arm + plate + speckled dough)."""
     import matplotlib
     matplotlib.use("Agg")
@@ -64,7 +66,7 @@ def squeeze_composite(arm, ee, tau_y, eta, geom, stem, n_grid=52, v_plate=0.08,
     grid = GridConfig(n_grid=n_grid, grid_lim=0.4)
     cw, cd, ch = geom
     pos, vol, floor = block(grid, size=geom, ppc=2)
-    s = Solver(grid=grid).load_particles(pos, vol)
+    s = Solver(grid=grid, device=device).load_particles(pos, vol)
     s.set_material(newtonian(eta=eta, density=1000.0, bulk_modulus=9.0e5).with_yield(tau_y))
     s.add_plane((0, 0, floor), (0, 0, 1), "sticky")
     cx = cy = grid.grid_lim * 0.5
@@ -112,7 +114,7 @@ def squeeze_composite(arm, ee, tau_y, eta, geom, stem, n_grid=52, v_plate=0.08,
     return str(fdir)
 
 
-def run(geom=(0.16, 0.16, 0.06), n_grid=52, width=720, height=520):
+def run(geom=(0.16, 0.16, 0.06), n_grid=52, width=720, height=520, device="auto"):
     OUT.mkdir(parents=True, exist_ok=True)
     arm = FrankaArm(height=height, width=width, hide_gripper=True)
     # shared EE-inversion + fixed camera (identical arm motion for every law)
@@ -143,7 +145,8 @@ def run(geom=(0.16, 0.16, 0.06), n_grid=52, width=720, height=520):
     print(f"unseen volume {geom}; rendering arm-driven squeeze + CoTracker per law...\n")
     fdirs, tracks = {}, {}
     for name, (ty, eta) in LAWS.items():
-        fdirs[name] = squeeze_composite(arm, ee, ty, eta, geom, name, n_grid=n_grid)
+        fdirs[name] = squeeze_composite(arm, ee, ty, eta, geom, name, n_grid=n_grid,
+                                        device=device)
         tr, vis = _cotrack(fdirs[name])
         tracks[name] = (tr, vis)
         print(f"  {name:8s}: CoTracker tracked {tr.shape[1]} dough pts over {tr.shape[0]} frames")
@@ -160,7 +163,7 @@ def run(geom=(0.16, 0.16, 0.06), n_grid=52, width=720, height=520):
           f"material motion (CoTracker, dough only)")
     _figure(tracks, err_t, final, geom)
     _side_by_side(fdirs, tracks, err_t)
-    return {"rollout_err_pct": final}
+    return {"rollout_err_pct": final, "device": device}
 
 
 def _figure(tracks, err_t, final, geom):
@@ -213,4 +216,7 @@ def _side_by_side(fdirs, tracks, err_t):
 
 
 if __name__ == "__main__":
-    run()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--device", default="cuda:0", help="Warp MPM device, e.g. cuda:0 or cuda:1")
+    args = parser.parse_args()
+    run(device=args.device)

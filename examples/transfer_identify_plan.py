@@ -15,6 +15,7 @@ Run:  ../.venv/bin/python examples/transfer_identify_plan.py
 """
 from __future__ import annotations
 
+import argparse
 import json
 from pathlib import Path
 
@@ -36,11 +37,12 @@ def _law(idres):
     return dict(E=E, nu=NU, yield_stress=idres["yield_hat"])
 
 
-def run(A=(0.09, 0.06, 0.045), B=(0.12, 0.08, 0.06), a_ref=(0.30, 0.18)):
+def run(A=(0.09, 0.06, 0.045), B=(0.12, 0.08, 0.06), a_ref=(0.30, 0.18),
+        device="auto"):
     print("=== #74 identify-on-A, plan-on-B transfer (von-Mises) ===", flush=True)
     # 1. identify on both sizes -> the recovered yield should be size-independent
-    idA = identify(probe(size=A, n_frames=180))
-    idB = identify(probe(size=B, n_frames=220))
+    idA = identify(probe(size=A, n_frames=180, device=device))
+    idB = identify(probe(size=B, n_frames=220, device=device))
     print(f"  identify on SMALL A {A}: yield={idA['yield_hat']:.1f} ({100*idA['yield_err']:.1f}%), "
           f"G={idA['G_hat']:.2e}", flush=True)
     print(f"  identify on LARGE B {B}: yield={idB['yield_hat']:.1f} ({100*idB['yield_err']:.1f}%), "
@@ -49,7 +51,8 @@ def run(A=(0.09, 0.06, 0.045), B=(0.12, 0.08, 0.06), a_ref=(0.30, 0.18)):
           f"(material property, size-independent)", flush=True)
 
     # 2. target on the LARGE block B, generated with the TRUE law
-    sc = PlateShapeScene(n_grid=32, ppc=2, size=B, n_seg=2, n_frames=80, sub=4)
+    sc = PlateShapeScene(n_grid=32, ppc=2, size=B, n_seg=2, n_frames=80, sub=4,
+                         device=device)
     a_ref = np.asarray(a_ref)
     target = sc.simulate(a_ref, params=TRUE)
     comp = 100 * (sc.z0 - target[:, 2].max()) / sc.z0
@@ -79,4 +82,7 @@ def run(A=(0.09, 0.06, 0.045), B=(0.12, 0.08, 0.06), a_ref=(0.30, 0.18)):
 
 
 if __name__ == "__main__":
-    run()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--device", default="auto", help="Warp device: auto (cuda if available), cuda:N, or cpu")
+    args = parser.parse_args()
+    run(device=args.device)

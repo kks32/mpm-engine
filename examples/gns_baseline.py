@@ -15,7 +15,7 @@ Run:  ../.venv/bin/python -m examples.gns_baseline gen      # generate warp roll
 """
 from __future__ import annotations
 
-import sys
+import argparse
 import time
 from pathlib import Path
 
@@ -37,7 +37,7 @@ TRUE = dict(E=5e5, nu=0.30, yield_stress=3000.0)
 
 # --------------------------------------------------------------------------- warp data generation
 def _rollout(action, size=(0.12, 0.08, 0.06), n_grid=32, ppc=2, n_frames=60, sub=4,
-             params=None, sub_idx=None, seed=0):
+             params=None, sub_idx=None, seed=0, device="auto"):
     """One warp von-Mises press; record subsampled particle positions per frame + tool center."""
     p = dict(TRUE);
     if params: p.update(params)
@@ -46,7 +46,7 @@ def _rollout(action, size=(0.12, 0.08, 0.06), n_grid=32, ppc=2, n_frames=60, sub
     N = len(pos)
     if sub_idx is None:
         sub_idx = np.sort(np.random.default_rng(0).choice(N, size=min(M, N), replace=False))
-    s = Solver(g).load_particles(pos, vol0).set_material(
+    s = Solver(g, device=device).load_particles(pos, vol0).set_material(
         vonmises(E=p["E"], nu=p["nu"], yield_stress=p["yield_stress"]))
     s.add_plane(point=(0, 0, floor), normal=(0, 0, 1), surface="sticky")
     dx = g.dx; dt = 2e-4; dt_ctrl = dt * sub
@@ -63,7 +63,7 @@ def _rollout(action, size=(0.12, 0.08, 0.06), n_grid=32, ppc=2, n_frames=60, sub
     return np.array(traj, np.float32), np.array(tool, np.float32), sub_idx, dx
 
 
-def gen(K=40, n_frames=60, out=OUT):
+def gen(K=40, n_frames=60, out=OUT, device="auto"):
     """Generate K rollouts with random press actions (the GNS training set)."""
     out = Path(out); out.mkdir(parents=True, exist_ok=True)
     rng = np.random.default_rng(1)
@@ -71,7 +71,8 @@ def gen(K=40, n_frames=60, out=OUT):
     t0 = time.time()
     for k in range(K):
         action = rng.uniform(0.05, 0.35, size=2)
-        traj, tool, sub_idx, dx = _rollout(action, n_frames=n_frames, sub_idx=sub_idx)
+        traj, tool, sub_idx, dx = _rollout(action, n_frames=n_frames, sub_idx=sub_idx,
+                                           device=device)
         rolls.append(dict(traj=traj, tool=tool, action=action))
         if (k + 1) % 5 == 0:
             print(f"  gen {k+1}/{K}  [{time.time()-t0:.0f}s]", flush=True)
@@ -187,22 +188,18 @@ def gns_rollout(trained, init_pos, action, tool0_z, n_frames=60, dt_ctrl=8e-4):
         hist.append(pos.clone())
     return pos.numpy()
 
-
-if __name__ == "__main__":
-    which = sys.argv[1] if len(sys.argv) > 1 else "gen"
-    if which == "gen":
-        K = int(sys.argv[2]) if len(sys.argv) > 2 else 40
-        gen(K=K)
-def _test_rollouts(sub_idx, actions, size=(0.12, 0.08, 0.06), params=None, n_frames=60):
+def _test_rollouts(sub_idx, actions, size=(0.12, 0.08, 0.06), params=None, n_frames=60,
+                   device="auto"):
     """Warp rollouts for a set of (held-out) actions, recording subsampled final positions."""
     finals = []
     for a in actions:
-        traj, tool, _, dx = _rollout(a, size=size, n_frames=n_frames, sub_idx=sub_idx, params=params)
+        traj, tool, _, dx = _rollout(a, size=size, n_frames=n_frames, sub_idx=sub_idx,
+                                     params=params, device=device)
         finals.append((traj[-1], traj[0], float(tool[0])))     # (final, init, tool0)
     return finals
 
 
-def compare(Ks=(2, 5, 10, 20, 40), n_test=4, epochs=40):
+def compare(Ks=(2, 5, 10, 20, 40), n_test=4, epochs=40, device="auto"):
     """Data-efficiency head-to-head: GNS prediction error vs #training rollouts K, against the
     one-probe identified MPM (K-independent). Plus a cross-size transfer probe."""
     import json
@@ -211,14 +208,15 @@ def compare(Ks=(2, 5, 10, 20, 40), n_test=4, epochs=40):
     test_actions = rng.uniform(0.05, 0.35, size=(n_test, 2))
     print(f"=== GNS data-efficiency vs one-probe identified MPM ({n_test} held-out actions) ===", flush=True)
     # ground truth (true law) for the held-out actions
-    gt = _test_rollouts(sub_idx, test_actions)                  # list of (final, init, tool0)
+    gt = _test_rollouts(sub_idx, test_actions, device=device)   # list of (final, init, tool0)
 
     def err(pred_finals):
         return float(np.mean([np.sqrt(((p - g[0]) ** 2).sum(-1)).mean() * 1000 for p, g in zip(pred_finals, gt)]))
 
     # identified MPM (yield 1.5% err): E_hat=7.70e5, yield_hat=3045 (from #75) -- re-sim the test actions
     id_law = dict(E=7.70e5, nu=0.30, yield_stress=3045.3)
-    mpm_finals = [f[0] for f in _test_rollouts(sub_idx, test_actions, params=id_law)]
+    mpm_finals = [f[0] for f in _test_rollouts(sub_idx, test_actions, params=id_law,
+                                               device=device)]
     mpm_err = err(mpm_finals)
     print(f"  identified MPM (ONE force probe): prediction MAE = {mpm_err:.2f} mm  (K-independent)", flush=True)
 
@@ -249,12 +247,15 @@ def compare(Ks=(2, 5, 10, 20, 40), n_test=4, epochs=40):
 
 
 if __name__ == "__main__":
-    which = sys.argv[1] if len(sys.argv) > 1 else "gen"
-    if which == "gen":
-        K = int(sys.argv[2]) if len(sys.argv) > 2 else 40
-        gen(K=K)
-    elif which == "train":
-        tr = train(k_use=int(sys.argv[2]) if len(sys.argv) > 2 else 40)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("which", nargs="?", default="gen", choices=("gen", "train", "compare"))
+    parser.add_argument("K", nargs="?", type=int, default=40)
+    parser.add_argument("--device", default="cuda:0", help="Warp MPM device, e.g. cuda:0 or cuda:1")
+    args = parser.parse_args()
+    if args.which == "gen":
+        gen(K=args.K, device=args.device)
+    elif args.which == "train":
+        train(k_use=args.K)
         print("trained.", flush=True)
-    elif which == "compare":
-        compare()
+    elif args.which == "compare":
+        compare(device=args.device)

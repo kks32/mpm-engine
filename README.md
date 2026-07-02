@@ -20,7 +20,8 @@ compact wrenches (never particles). Core is the warp-mpm fork (12 materials incl
 Newtonian/Bingham dough, mu(I) sand) wrapped behind a small typed `Solver`.
 
 What exists today:
-- `core/solver.py` — CPU-default `Solver` (load / material / collider / step / export) +
+- `core/solver.py` — CUDA-default `Solver` (`cuda:0`; pass `device="cuda:1"` for the
+  second GPU or `device="cpu"` for CPU fallback) (load / material / collider / step / export) +
   `GridConfig`. The kinematic box collider lives here as `Solver.add_box` / `set_box`
   (the robot end-effector proxy).
 - `materials/` — composable presets: `newtonian`, `granular`, `elastic`, `dough` (each

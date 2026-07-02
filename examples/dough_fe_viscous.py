@@ -16,6 +16,7 @@ realized band. Force data is essential: it supplies P_plate. Run:
 """
 from __future__ import annotations
 
+import argparse
 import sys
 from pathlib import Path
 
@@ -47,12 +48,12 @@ def _gd(L):
 
 
 def squeeze(v_plate, fe, n_grid=48, geom=(0.12, 0.12, 0.06), press_strain=0.5,
-            dt=1.0e-4, substeps=20, frame_stride=3):
+            dt=1.0e-4, substeps=20, frame_stride=3, device="auto"):
     """One 3D squeeze; per frame return (diss, X_fe[K], X_bing[2], gd-percentiles)."""
     grid = GridConfig(n_grid=n_grid, grid_lim=0.4)
     cw, cd, ch = geom
     pos, vol0, floor = block(grid, size=geom, ppc=2)
-    s = Solver(grid=grid).load_particles(pos, vol0)
+    s = Solver(grid=grid, device=device).load_particles(pos, vol0)
     s.set_material(newtonian(eta=TRUTH["eta"], density=1000.0, bulk_modulus=9.0e5)
                    .with_yield(TRUTH["tau_y"]).with_powerlaw(K=TRUTH["pk"], n=TRUTH["pn"]))
     s.add_plane((0, 0, floor), (0, 0, 1), "sticky")
@@ -116,7 +117,7 @@ def viscous_prior(fe, s_grid, n=800, seed=0):
     return tbar, cov
 
 
-def run():
+def run(device="auto"):
     from ident.features.function_encoder import FunctionEncoderDict
     OUT.mkdir(parents=True, exist_ok=True)
     d = np.load(REPO / "mpm_engine/fe-weights/viscous.npz")
@@ -124,7 +125,7 @@ def run():
     speeds = (0.04, 0.08, 0.16)
     A_fe, A_b, bvec, gdp = [], [], [], []
     for vp in speeds:
-        rows, KE, gd_all = squeeze(vp, fe)
+        rows, KE, gd_all = squeeze(vp, fe, device=device)
         n = len(rows)
         for f in range(n):
             _t, Pplate, Pg, X_fe, X_b = rows[f]
@@ -190,4 +191,7 @@ def _figure(gg, eta_t, eta_b, eta_fe0, eta_fe, rb, rf0, rf):
 
 
 if __name__ == "__main__":
-    run()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--device", default="cuda:0", help="Warp MPM device, e.g. cuda:0 or cuda:1")
+    args = parser.parse_args()
+    run(device=args.device)

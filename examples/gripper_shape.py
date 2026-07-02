@@ -12,7 +12,7 @@ Run:  ../.venv/bin/python -m examples.gripper_shape demo      # multi-grip sculp
 """
 from __future__ import annotations
 
-import sys
+import argparse
 import time
 from pathlib import Path
 
@@ -34,8 +34,9 @@ def chamfer(a, b):
 
 class GripperShapeScene:
     def __init__(self, n_grid=32, grid_lim=0.30, size=(0.12, 0.08, 0.06), center=(0.15, 0.15, 0.05),
-                 ppc=2, m_match=300, seed=0):
+                 ppc=2, m_match=300, seed=0, device="auto"):
         self.g = GridConfig(n_grid=n_grid, grid_lim=grid_lim)
+        self.device = device
         self.pos0, self.vol0, self.floor = block(self.g, size=size, center=center, ppc=ppc, seed=seed)
         self.N = len(self.pos0); self.size = size; self.center = center
         self.dx = self.g.dx; self.dt = 2e-4; self.sub = 4; self.dt_ctrl = self.dt * self.sub
@@ -59,7 +60,7 @@ class GripperShapeScene:
     def simulate(self, grips, params=None, vclose=0.10, settle=25, gap_open=0.15):
         """Run a sequence of grips. grips: list of (axis, cx, cy, gap_final). Returns final positions."""
         p = dict(params or ID_LAW)
-        s = Solver(self.g).load_particles(self.pos0.copy(), self.vol0.copy())
+        s = Solver(self.g, device=self.device).load_particles(self.pos0.copy(), self.vol0.copy())
         s.set_material(vonmises(E=p["E"], nu=p["nu"], yield_stress=p["yield_stress"]))
         s.add_plane(point=(0, 0, self.floor), normal=(0, 0, 1), surface="sticky")
         cL, cR, half = self._box_centers("x", self.cx, self.cy, gap_open)
@@ -93,7 +94,7 @@ class GripperShapeScene:
     def simulate_record(self, grips, params=None, vclose=0.10, settle=25, gap_open=0.15, every=8):
         """Like simulate, but record (positions, visible finger boxes) frames for rendering."""
         p = dict(params or ID_LAW)
-        s = Solver(self.g).load_particles(self.pos0.copy(), self.vol0.copy())
+        s = Solver(self.g, device=self.device).load_particles(self.pos0.copy(), self.vol0.copy())
         s.set_material(vonmises(E=p["E"], nu=p["nu"], yield_stress=p["yield_stress"]))
         s.add_plane(point=(0, 0, self.floor), normal=(0, 0, 1), surface="sticky")
         _, _, half0 = self._box_centers("x", self.cx, self.cy, gap_open)
@@ -180,9 +181,9 @@ def _topdown_png(clouds_labels, path, lim=0.30):
     fig.tight_layout(); fig.savefig(path, dpi=130); print(f"figure -> {path}", flush=True)
 
 
-def demo():
+def demo(device="auto"):
     print("=== gripper shaping demo (identified MPM): x-pinch then y-pinch ===", flush=True)
-    sc = GripperShapeScene()
+    sc = GripperShapeScene(device=device)
     grips = [("x", 0.15, 0.15, 0.06), ("y", 0.15, 0.15, 0.06)]
     t = time.time()
     x = sc.simulate(grips)
@@ -213,12 +214,12 @@ def cem_plan_grips(sc, target, params=None, axes=("x", "y"), pop=12, elite=4, n_
     return _grips_from_vec(best, axes), best_v
 
 
-def plan():
+def plan(device="auto"):
     """End-to-end: a target is made by a reference grip sequence (TRUE law); the gripper planner
     reaches it THROUGH THE IDENTIFIED LAW; executed in the TRUE engine. Closes the press->identify->
     gripper-shape loop."""
     print("=== gripper shaping to a target (identified-MPM planner) ===", flush=True)
-    sc = GripperShapeScene()
+    sc = GripperShapeScene(device=device)
     ref = [("x", 0.14, 0.15, 0.06), ("y", 0.15, 0.16, 0.07)]      # the target-generating grips (TRUE law)
     target_full = sc.simulate(ref, params=TRUE)
     target = target_full[sc.match_idx]
@@ -249,12 +250,12 @@ def _t_target(sc, n=320, seed=0):
     return np.array(pts, np.float32)
 
 
-def tshape(pop=10, elite=3, n_iter=3, seed=1):
+def tshape(pop=10, elite=3, n_iter=3, seed=1, device="auto"):
     """Plan localized x-pinches at low y to carve a T (stem) while the top stays wide (bar). CEM over
     (cy, gap, perp_half) for 2 grips, seeded at the working prototype."""
     import json
     print("=== T-shape: localized-pinch planning to a T target ===", flush=True)
-    sc = GripperShapeScene()
+    sc = GripperShapeScene(device=device)
     target = _t_target(sc); tgt = target[np.random.default_rng(0).choice(len(target), 300)]
     lo = np.array([0.115, 0.045, 0.025] * 2); hi = np.array([0.150, 0.065, 0.040] * 2)
     mean = np.array([0.128, 0.048, 0.030, 0.128, 0.050, 0.030]); std = 0.3 * (hi - lo)
@@ -283,12 +284,12 @@ def tshape(pop=10, elite=3, n_iter=3, seed=1):
     return grips
 
 
-def video():
+def video(device="auto"):
     """Render the PLANNED grips (from plan.json) as an MP4: gripper fingers close, dough deforms,
     target shown alongside."""
     import json
     print("=== rendering gripper-shaping video (planned grips) ===", flush=True)
-    sc = GripperShapeScene()
+    sc = GripperShapeScene(device=device)
     pj = OUT / "plan.json"
     if pj.exists():
         d = json.load(open(pj)); grips = [tuple(g) for g in d["planned"]]; ref = [tuple(g) for g in d["ref"]]
@@ -302,12 +303,15 @@ def video():
 
 
 if __name__ == "__main__":
-    which = sys.argv[1] if len(sys.argv) > 1 else "demo"
-    if which == "demo":
-        demo()
-    elif which == "plan":
-        plan()
-    elif which == "video":
-        video()
-    elif which == "tshape":
-        tshape()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("which", nargs="?", default="demo", choices=("demo", "plan", "video", "tshape"))
+    parser.add_argument("--device", default="auto", help="Warp device: auto (cuda if available), cuda:N, or cpu")
+    args = parser.parse_args()
+    if args.which == "demo":
+        demo(device=args.device)
+    elif args.which == "plan":
+        plan(device=args.device)
+    elif args.which == "video":
+        video(device=args.device)
+    elif args.which == "tshape":
+        tshape(device=args.device)

@@ -12,6 +12,7 @@ Run:  ../.venv/bin/python examples/wrist_ft_franka.py
 """
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 
 import numpy as np
@@ -23,11 +24,12 @@ from warpmpm.coupling.backend import WarpMPMBackend
 OUT = Path(__file__).resolve().parents[1] / "out"
 
 
-def run(n_grid=44, frames=70, substeps=20, dt=1.0e-4, v_plate=0.08, settle=220, every=2):
+def run(n_grid=44, frames=70, substeps=20, dt=1.0e-4, v_plate=0.08, settle=220,
+        every=2, device="auto"):
     grid = GridConfig(n_grid=n_grid, grid_lim=0.4)
     ds = (0.12, 0.12, 0.07)
     pos, vol, floor = block(grid, size=ds, ppc=2)
-    s = Solver(grid=grid).load_particles(pos, vol)
+    s = Solver(grid=grid, device=device).load_particles(pos, vol)
     s.set_material(newtonian(eta=40.0, density=1000.0).with_yield(200.0))
     s.add_plane((0, 0, floor), (0, 0, 1), "sticky")
     cx = cy = grid.grid_lim * 0.5
@@ -83,8 +85,11 @@ def run(n_grid=44, frames=70, substeps=20, dt=1.0e-4, v_plate=0.08, settle=220, 
     p = OUT / "wrist_ft_franka.png"
     fig.savefig(p, dpi=130); plt.close(fig)
     print("wrote", p)
-    return {"rel_l2": relerr, "n": len(rec), "fig": str(p)}
+    return {"rel_l2": relerr, "n": len(rec), "fig": str(p), "device": device}
 
 
 if __name__ == "__main__":
-    run()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--device", default="auto", help="Warp device: auto (cuda if available), cuda:N, or cpu")
+    args = parser.parse_args()
+    run(device=args.device)

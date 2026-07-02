@@ -16,6 +16,7 @@ Run:  ../.venv/bin/python examples/dough_franka_press.py
 """
 from __future__ import annotations
 
+import argparse
 import subprocess
 import tempfile
 from pathlib import Path
@@ -31,11 +32,12 @@ OUT = Path(__file__).resolve().parents[1] / "out"
 
 def run(n_grid=48, ticks=130, substeps=24, dt=2.0e-5, f_target=40.0, v_max=0.45,
         damping=None, allow_retract=False, eta=80.0, tau_y=900.0, density=1200.0,
-        clearance=0.006, f_lowpass=0.25, render=True, out_name="dough_franka_press.mp4"):
+        clearance=0.006, f_lowpass=0.25, render=True, out_name="dough_franka_press.mp4",
+        device="auto"):
     grid = GridConfig(n_grid=n_grid, grid_lim=0.4)
     dough_size = (0.12, 0.10, 0.07)
     pos, vol, floor = block(grid, size=dough_size, ppc=2)
-    s = Solver(grid=grid).load_particles(pos, vol)
+    s = Solver(grid=grid, device=device).load_particles(pos, vol)
     s.set_material(newtonian(eta=eta, density=density).with_yield(tau_y))
     s.add_plane((0, 0, floor), (0, 0, 1), "sticky")
     cx = cy = grid.grid_lim * 0.5
@@ -148,7 +150,7 @@ def run(n_grid=48, ticks=130, substeps=24, dt=2.0e-5, f_target=40.0, v_max=0.45,
         "press_depth_mm": max(0.0, (dough_top - box_bottom)) * 1e3,
         "settle_drift_mm": settle_drift_mm,
         "halted": bool(settle_drift_mm < 0.8 and f_tail > 0.4 * f_target),
-        "n_contact_final": int(log[-1][4]), "ticks": ticks, "mp4": None,
+        "n_contact_final": int(log[-1][4]), "ticks": ticks, "device": device, "mp4": None,
     }
     if render and arm is not None:
         OUT.mkdir(exist_ok=True)
@@ -163,5 +165,9 @@ def run(n_grid=48, ticks=130, substeps=24, dt=2.0e-5, f_target=40.0, v_max=0.45,
 
 
 if __name__ == "__main__":
-    m = run()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--device", default="auto", help="Warp device: auto (cuda if available), cuda:N, or cpu")
+    parser.add_argument("--no-render", action="store_true", help="skip video rendering")
+    args = parser.parse_args()
+    m = run(device=args.device, render=not args.no_render)
     print("\nmetrics:", {k: (round(v, 3) if isinstance(v, float) else v) for k, v in m.items()})

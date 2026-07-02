@@ -7,7 +7,16 @@ end-effector drives the MPM gripper box and reads back the reaction wrench.
 """
 from __future__ import annotations
 
+import os
+
 import numpy as np
+
+
+def _default_mujoco_gl() -> None:
+    """Use EGL for offscreen MuJoCo rendering on headless Linux."""
+    if os.name == "posix" and not os.environ.get("DISPLAY"):
+        os.environ.setdefault("MUJOCO_GL", "egl")
+        os.environ.setdefault("PYOPENGL_PLATFORM", "egl")
 
 
 class FrankaArm:
@@ -19,6 +28,7 @@ class FrankaArm:
 
     def __init__(self, height: int = 480, width: int = 640, ft_sensor: bool = False,
                  hide_gripper: bool = False):
+        _default_mujoco_gl()
         import mujoco
         from robot_descriptions import panda_mj_description
 
@@ -67,6 +77,19 @@ class FrankaArm:
         self.cam.azimuth = 135
         self.cam.elevation = -20
         self._prev_ee = None
+
+    def close(self) -> None:
+        """Release MuJoCo renderer resources, suppressing backend shutdown noise."""
+        renderer = getattr(self, "renderer", None)
+        if renderer is not None:
+            try:
+                renderer.close()
+            except Exception:
+                pass
+            self.renderer = None
+
+    def __del__(self):
+        self.close()
 
     def set_descent(self, frac: float, dt: float, track_camera: bool = True) -> dict:
         """Set the arm to a scripted descent fraction in [0,1]; return EE world pose+vel.

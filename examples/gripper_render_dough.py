@@ -3,17 +3,20 @@ per frame (density field -> marching cubes -> Taubin smoothing) into a smooth sh
 the gripper fingers are drawn as solid boxes, on a ground plane with a soft shadow. Two panels:
 the target dough (left) and the achieved dough + gripper (right).
 
-Run:  ../.venv/bin/python -m examples.gripper_render_dough
+Run:
+  python examples/gripper_shape.py plan --device cuda:0
+  python examples/gripper_render_dough.py plan --device cuda:0
 """
 from __future__ import annotations
 
+import argparse
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
 import numpy as np
 
-import sys  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # make `examples` importable when run as a script
 from examples.gripper_shape import GripperShapeScene, ID_LAW, TRUE, OUT  # noqa: E402
 
@@ -156,11 +159,10 @@ def render(frames, target, mp4, dx, floor, fps=12, turntable=48):
     return mp4
 
 
-def main():
-    import json, sys
-    mode = sys.argv[1] if len(sys.argv) > 1 else "plan"
+def main(mode="plan", device="auto"):
+    import json
     print(f"=== dough-style gripper-shaping render (mode={mode}) ===", flush=True)
-    sc = GripperShapeScene()
+    sc = GripperShapeScene(device=device)
     if mode == "t":
         d = json.load(open(OUT / "t_plan.json")); grips = [tuple(g) for g in d["planned"]]
         target = np.load(OUT / "t_target.npy"); out_mp4 = OUT / "t_shaping_dough.mp4"
@@ -174,4 +176,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Render smooth paper-style gripper shaping videos.")
+    parser.add_argument("mode", nargs="?", default="plan", choices=("plan", "t"))
+    parser.add_argument("--device", default="auto", help="Warp device: auto (cuda if available), cuda:N, or cpu")
+    args = parser.parse_args()
+    main(mode=args.mode, device=args.device)

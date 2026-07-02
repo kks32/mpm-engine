@@ -17,6 +17,7 @@ the ground-truth (tau_y, eta)=(200,40). Run:  ../.venv/bin/python examples/reald
 """
 from __future__ import annotations
 
+import argparse
 import json
 import subprocess
 import sys
@@ -49,7 +50,7 @@ def _savej(p, obj):
 
 # ----------------------------------------------------------------------------- dataset gen
 def make_dataset(scale, tag, n_grid=64, v_plate=0.08, press_strain=0.5, dt=1.0e-4,
-                 substeps=20, frame_stride=3, width=520):
+                 substeps=20, frame_stride=3, width=520, device="auto"):
     """Quasi-2D plane-strain squeeze; write a real-data-shaped dataset: textured-surface ortho
     frames + cam.json (perception.track homography) + force.csv (measured) + meta.json."""
     import matplotlib
@@ -70,7 +71,7 @@ def make_dataset(scale, tag, n_grid=64, v_plate=0.08, press_strain=0.5, dt=1.0e-
     pos = np.stack(np.meshgrid(xs, ys, zs, indexing="ij"), -1).reshape(-1, 3).astype(np.float32)
     pos += np.random.default_rng(0).uniform(-0.2 * h, 0.2 * h, pos.shape).astype(np.float32)
     vol = np.full(len(pos), h ** 3, dtype=np.float32)
-    s = Solver(grid=grid).load_particles(pos, vol)
+    s = Solver(grid=grid, device=device).load_particles(pos, vol)
     s.set_material(newtonian(eta=TRUTH[1], density=1000.0,
                              bulk_modulus=9.0e5).with_yield(TRUTH[0]))
     pad = 3 * dx
@@ -131,7 +132,8 @@ def make_dataset(scale, tag, n_grid=64, v_plate=0.08, press_strain=0.5, dt=1.0e-
            "frame_indices": saved, "n_frames": k, "frames_dir": str(fdir)}
     _savej(OUT / tag / "cam.json", cam)
     meta = {"v_plate": v_plate, "slab": slab, "rho": 1000.0, "col_w": col_w, "col_h": col_h,
-            "floor": floor, "cx": cx, "frame_dt": fdt * frame_stride, "scale": scale}
+            "floor": floor, "cx": cx, "frame_dt": fdt * frame_stride, "scale": scale,
+            "device": device}
     _savej(OUT / tag / "meta.json", meta)
     subprocess.run(["ffmpeg", "-y", "-framerate", "14", "-i", str(fdir / "f_%04d.png"),
                     "-c:v", "libx264", "-pix_fmt", "yuv420p",
@@ -214,7 +216,7 @@ def identify(tag, t_lo_frac=0.12, t_hi_frac=0.92, reuse_tracks=True):
 
 
 def _slab_force_series(scale, tau_y, eta, n_grid=64, v_plate=0.08, press_strain=0.5,
-                       dt=1.0e-4, substeps=20):
+                       dt=1.0e-4, substeps=20, device="auto"):
     """Re-sim the same quasi-2D slab squeeze with a given law; return (strain%, |Fz|)."""
     grid = GridConfig(n_grid=n_grid, grid_lim=0.4); dx = grid.dx; s_lin = float(scale) ** 0.5
     col_w = 0.13 * s_lin; col_h = 0.06 * s_lin; slab = 6 * dx; cx = cy = 0.2; floor = 3 * dx
@@ -224,7 +226,7 @@ def _slab_force_series(scale, tau_y, eta, n_grid=64, v_plate=0.08, press_strain=
     zs = np.arange(floor + 0.5 * h, floor + col_h, h)
     pos = np.stack(np.meshgrid(xs, ys, zs, indexing="ij"), -1).reshape(-1, 3).astype(np.float32)
     pos += np.random.default_rng(0).uniform(-0.2 * h, 0.2 * h, pos.shape).astype(np.float32)
-    s = Solver(grid=grid).load_particles(pos, np.full(len(pos), h ** 3, np.float32))
+    s = Solver(grid=grid, device=device).load_particles(pos, np.full(len(pos), h ** 3, np.float32))
     s.set_material(newtonian(eta=eta, density=1000.0, bulk_modulus=9.0e5).with_yield(tau_y))
     pad = 3 * dx
     s.add_plane((0, 0, floor), (0, 0, 1), "sticky")
@@ -247,13 +249,13 @@ def _slab_force_series(scale, tau_y, eta, n_grid=64, v_plate=0.08, press_strain=
     return np.array(st), np.array(Fz)
 
 
-def rollout_error(tag):
+def rollout_error(tag, device="auto"):
     """Re-sim the RECOVERED law and compare its force rollout to ground truth -- the metric
     that matters (tau_y/eta trade off; what counts is reproducing the dynamics)."""
     r = _loadj(OUT / tag / "identify.json")
     scale = _loadj(OUT / tag / "meta.json")["scale"]
-    st, F_t = _slab_force_series(scale, *TRUTH)
-    _, F_r = _slab_force_series(scale, r["tau_y_hat"], r["eta_hat"])
+    st, F_t = _slab_force_series(scale, *TRUTH, device=device)
+    _, F_r = _slab_force_series(scale, r["tau_y_hat"], r["eta_hat"], device=device)
     w = st > 5
     relL2 = float(np.linalg.norm((F_r - F_t)[w]) / max(np.linalg.norm(F_t[w]), 1e-9))
     print(f"[{tag}]  PARAM err (tau_y,eta)=({r['tau_y_err']*100:.0f}%,{r['eta_err']*100:.0f}%) "
@@ -263,11 +265,11 @@ def rollout_error(tag):
             "law": (r["tau_y_hat"], r["eta_hat"])}
 
 
-def eval_rollout(tags=("vol_1x", "vol_1p5x")):
+def eval_rollout(tags=("vol_1x", "vol_1p5x"), device="auto"):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-    res = [rollout_error(t) for t in tags]
+    res = [rollout_error(t, device=device) for t in tags]
     fig, axes = plt.subplots(1, len(res), figsize=(5.4 * len(res), 4.2))
     for ax, r in zip(np.atleast_1d(axes), res, strict=False):
         ax.plot(r["st"], r["F_t"], color="#2b8a3e", lw=2.4, label="ground truth (200,40)")
@@ -287,12 +289,15 @@ def eval_rollout(tags=("vol_1x", "vol_1p5x")):
     return res
 
 
-def run():
+def run(device="auto"):
     OUT.mkdir(parents=True, exist_ok=True)
-    make_dataset(1.0, "vol_1x"); identify("vol_1x")
-    make_dataset(1.5, "vol_1p5x"); identify("vol_1p5x")
-    return eval_rollout()
+    make_dataset(1.0, "vol_1x", device=device); identify("vol_1x")
+    make_dataset(1.5, "vol_1p5x", device=device); identify("vol_1p5x")
+    return eval_rollout(device=device)
 
 
 if __name__ == "__main__":
-    run()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--device", default="auto", help="Warp device: auto (cuda if available), cuda:N, or cpu")
+    args = parser.parse_args()
+    run(device=args.device)

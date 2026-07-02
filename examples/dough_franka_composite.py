@@ -10,6 +10,7 @@ Run:  ../.venv/bin/python examples/dough_franka_composite.py
 """
 from __future__ import annotations
 
+import argparse
 import subprocess
 import tempfile
 from pathlib import Path
@@ -29,11 +30,11 @@ OUT = Path(__file__).resolve().parents[1] / "out"
 
 
 def run(n_grid=48, ticks=50, substeps=30, dt=2.0e-5, render_every=1,
-        clearance=0.02, press=0.05):
+        clearance=0.02, press=0.05, device="auto"):
     grid = GridConfig(n_grid=n_grid, grid_lim=0.4)
     dough_size = (0.12, 0.10, 0.07)
     pos, vol, floor = block(grid, size=dough_size, ppc=2)
-    s = Solver(grid=grid).load_particles(pos, vol)
+    s = Solver(grid=grid, device=device).load_particles(pos, vol)
     s.set_material(dough())
     s.add_plane((0, 0, floor), (0, 0, 1), "sticky")
     cx = cy = grid.grid_lim * 0.5
@@ -119,4 +120,7 @@ def run(n_grid=48, ticks=50, substeps=30, dt=2.0e-5, render_every=1,
 
 
 if __name__ == "__main__":
-    run()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--device", default="cuda:0", help="Warp MPM device, e.g. cuda:0 or cuda:1")
+    args = parser.parse_args()
+    run(device=args.device)

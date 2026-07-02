@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 import subprocess
 import tempfile
+import argparse
 from pathlib import Path
 
 import numpy as np
@@ -81,11 +82,11 @@ def power_balance_identify(rec: dict, v_plate: float, frame_dt: float,
 
 def run(n_grid=48, v_plate=0.08, eta=40.0, tau_y=200.0, density=1000.0, bulk=9.0e5,
         press_strain=0.5, dt=1.0e-4, substeps=20, render=True, render_every=3,
-        out_name="squeeze_plate_franka.mp4"):
+        out_name="squeeze_plate_franka.mp4", device="auto"):
     grid = GridConfig(n_grid=n_grid, grid_lim=0.4)
     col_w, col_d, col_h = 0.12, 0.12, 0.06
     pos, vol0, floor = block(grid, size=(col_w, col_d, col_h), ppc=2)
-    s = Solver(grid=grid).load_particles(pos, vol0)
+    s = Solver(grid=grid, device=device).load_particles(pos, vol0)
     s.set_material(newtonian(eta=eta, density=density, bulk_modulus=bulk).with_yield(tau_y))
     s.add_plane((0, 0, floor), (0, 0, 1), "sticky")
     cx = cy = grid.grid_lim * 0.5
@@ -218,6 +219,7 @@ def run(n_grid=48, v_plate=0.08, eta=40.0, tau_y=200.0, density=1000.0, bulk=9.0
     ident_eos = power_balance_identify(rec, v_plate, frame_dt, t_lo, t_hi, correct_eos=True)
     res = {
         "tau_y_true": tau_y, "eta_true": eta, "v_plate": v_plate, "n_grid": n_grid,
+        "device": device,
         # matched to the 2D method (incompressible assumption)
         "tau_y_hat": ident["tau_y_hat"], "eta_hat": ident["eta_hat"],
         "tau_y_err": abs(ident["tau_y_hat"] - tau_y) / tau_y,
@@ -283,4 +285,8 @@ def _figure(rec, ident, res, path):
 
 
 if __name__ == "__main__":
-    run()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--device", default="auto", help="Warp device: auto (cuda if available), cuda:N, or cpu")
+    parser.add_argument("--no-render", action="store_true", help="skip video/figure rendering")
+    args = parser.parse_args()
+    run(device=args.device, render=not args.no_render)

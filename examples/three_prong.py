@@ -12,7 +12,7 @@ Run:  ../.venv/bin/python -m examples.three_prong
 """
 from __future__ import annotations
 
-import sys
+import argparse
 from pathlib import Path
 
 import numpy as np
@@ -28,8 +28,9 @@ ANGLES = np.deg2rad([90.0, 210.0, 330.0])                 # three prongs, 120 de
 
 class ThreeProngScene:
     def __init__(self, n_grid=32, grid_lim=0.30, size=(0.09, 0.09, 0.05),
-                 center=(0.15, 0.15, 0.045), ppc=2, seed=0):
+                 center=(0.15, 0.15, 0.045), ppc=2, seed=0, device="auto"):
         self.g = GridConfig(n_grid=n_grid, grid_lim=grid_lim)
+        self.device = device
         self.pos0, self.vol0, self.floor = block(self.g, size=size, center=center, ppc=ppc, seed=seed)
         self.N = len(self.pos0)
         self.cx, self.cy, self.cz = center
@@ -43,7 +44,7 @@ class ThreeProngScene:
 
     def run(self, params=None, R0=0.075, Rf=0.040, vclose=0.10, settle=40, every=8):
         p = dict(params or ID_LAW)
-        s = Solver(self.g).load_particles(self.pos0.copy(), self.vol0.copy())
+        s = Solver(self.g, device=self.device).load_particles(self.pos0.copy(), self.vol0.copy())
         s.set_material(vonmises(E=p["E"], nu=p["nu"], yield_stress=p["yield_stress"]))
         s.add_plane(point=(0, 0, self.floor), normal=(0, 0, 1), surface="sticky")
         c0 = self._prong_centers(R0)
@@ -99,9 +100,9 @@ def lobedness(x0, xf, cx, cy):
     return mode3(th, r0), mode3(th, rf)
 
 
-def main():
+def main(device="auto"):
     OUT.mkdir(parents=True, exist_ok=True)
-    sc = ThreeProngScene()
+    sc = ThreeProngScene(device=device)
     print(f"=== 3-prong gripper on dough (N={sc.N} particles, law={ID_LAW}) ===", flush=True)
     xf, frames = sc.run()
     x0 = frames[0]["x"]
@@ -148,4 +149,7 @@ def _figure(x0, xf, frames, sc, path):
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--device", default="auto", help="Warp device: auto (cuda if available), cuda:N, or cpu")
+    args = parser.parse_args()
+    main(device=args.device)

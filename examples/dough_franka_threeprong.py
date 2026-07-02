@@ -16,6 +16,7 @@ Run:  ../.venv/bin/python examples/dough_franka_threeprong.py
 """
 from __future__ import annotations
 
+import argparse
 import subprocess
 import tempfile
 from pathlib import Path
@@ -57,8 +58,9 @@ class FrankaThreeProng:
     """Three box fingertips mounted on the Franka, closing radially on dough."""
 
     def __init__(self, n_grid=32, grid_lim=0.30, size=(0.09, 0.09, 0.05),
-                 center=(0.15, 0.15, 0.045), ppc=2, seed=0):
+                 center=(0.15, 0.15, 0.045), ppc=2, seed=0, device="auto"):
         self.grid = GridConfig(n_grid=n_grid, grid_lim=grid_lim)
+        self.device = device
         self.pos0, self.vol0, self.floor = block(self.grid, size=size, center=center,
                                                   ppc=ppc, seed=seed)
         self.N = len(self.pos0)
@@ -76,7 +78,7 @@ class FrankaThreeProng:
             lift=0.10, settle=50, every=3, render=True,
             out_name="dough_franka_threeprong.mp4"):
         p = dict(params or ID_LAW)
-        s = Solver(self.grid).load_particles(self.pos0.copy(), self.vol0.copy())
+        s = Solver(self.grid, device=self.device).load_particles(self.pos0.copy(), self.vol0.copy())
         s.set_material(vonmises(E=p["E"], nu=p["nu"], yield_stress=p["yield_stress"]))
         s.add_plane(point=(0, 0, self.floor), normal=(0, 0, 1), surface="sticky")
 
@@ -264,8 +266,8 @@ def _topview(x0, xf, cx, cy, fhalf, path):
     fig.savefig(path, dpi=150)
 
 
-def main():
-    sc = FrankaThreeProng()
+def main(device="auto"):
+    sc = FrankaThreeProng(device=device)
     print(f"=== 3-prong Franka gripper on dough (N={sc.N}, law={ID_LAW}) ===", flush=True)
     m = sc.run()
     print("\nmetrics:", {k: (round(v, 4) if isinstance(v, float) else v)
@@ -273,4 +275,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--device", default="auto", help="Warp device: auto (cuda if available), cuda:N, or cpu")
+    args = parser.parse_args()
+    main(device=args.device)

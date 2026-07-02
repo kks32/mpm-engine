@@ -8,6 +8,7 @@ Run:  ../.venv/bin/python examples/dough_surface_render.py
 """
 from __future__ import annotations
 
+import argparse
 import subprocess
 from pathlib import Path
 
@@ -49,7 +50,7 @@ def _box_polys(cx, cy, cz, hx, hy, hz):
 
 def run(tau_y=200.0, eta=40.0, geom=(0.16, 0.16, 0.06), n_grid=52, v_plate=0.08,
         press_strain=0.5, dt=1.0e-4, substeps=20, frame_stride=6, still_frac=0.55,
-        speckle_tex=True):
+        speckle_tex=True, device="auto"):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -58,7 +59,7 @@ def run(tau_y=200.0, eta=40.0, geom=(0.16, 0.16, 0.06), n_grid=52, v_plate=0.08,
     grid = GridConfig(n_grid=n_grid, grid_lim=0.4)
     cw, cd, ch = geom
     pos, vol, floor = block(grid, size=geom, ppc=2)
-    s = Solver(grid=grid).load_particles(pos, vol)
+    s = Solver(grid=grid, device=device).load_particles(pos, vol)
     s.set_material(newtonian(eta=eta, density=1000.0, bulk_modulus=9.0e5).with_yield(tau_y))
     s.add_plane((0, 0, floor), (0, 0, 1), "sticky")
     cx = cy = grid.grid_lim * 0.5
@@ -120,8 +121,12 @@ def run(tau_y=200.0, eta=40.0, geom=(0.16, 0.16, 0.06), n_grid=52, v_plate=0.08,
                     "-c:v", "libx264", "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
                     "-pix_fmt", "yuv420p", str(mp4)], check=True, capture_output=True)
     print("wrote", mp4, "and", OUT / "dough_surface_still.png")
-    return {"video": str(mp4), "still": str(OUT / "dough_surface_still.png")}
+    return {"video": str(mp4), "still": str(OUT / "dough_surface_still.png"),
+            "device": device}
 
 
 if __name__ == "__main__":
-    run()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--device", default="cuda:0", help="Warp MPM device, e.g. cuda:0 or cuda:1")
+    args = parser.parse_args()
+    run(device=args.device)
