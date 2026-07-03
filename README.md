@@ -35,8 +35,9 @@ What exists today:
 - `adapters/mujoco_adapter.py` — `FrankaArm`: scripted Panda descent + composite render;
   `PandaPour`: the Dogma95-ported pour kinematics (FK bit-identical to the Genesis panda).
 - `scenes.py` — `block`, `dough` scene builders.
-- `examples/pour_franka.py` — Franka pours MPM water glass-to-glass, action + geometry
-  identical to the Dogma95 Genesis/SPH pouring study (cross-simulator comparable).
+- `examples/pour_franka.py` — Franka pours MPM honey glass-to-glass (192^3), action +
+  geometry identical to the Dogma95 Genesis/SPH pouring study (cross-simulator
+  comparable); volume fidelity of the bed is measured, first-order in dx.
 - `tests/`, `benchmarks/` — conservation + sanity (incl. cup containment / pour); ms/step.
 
 Planned (stubs today): capsule/sphere SDF colliders and a baked mesh-SDF collider for

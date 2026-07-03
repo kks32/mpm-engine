@@ -1,13 +1,17 @@
-"""Franka pours MPM water from one glass into another -- the pouring counterpart of the
+"""Franka pours MPM honey from one glass into another -- the pouring counterpart of the
 viscoplastic dough-press experiments, on the same engine.
 
 The robot ACTION and the scene GEOMETRY are ported 1:1 from the Dogma95 Genesis (SPH)
 pouring study (robotic_arm_pour_genesis.py): the same Panda joint trajectory (FK is
 bit-identical between the two panda models), the same glass profile, poses, and 80%
 fill -- so the identical pour is directly comparable across the two simulators. The
-liquid is warpmpm's weakly-compressible generalized-Newtonian fluid at water-like
-viscosity (eta = 1e-3 Pa.s; at dx ~ 5 mm the numerical dissipation dominates true water
-viscosity, so this is the inviscid end of what the discretization resolves). Both
+liquid is honey on warpmpm's weakly-compressible generalized-Newtonian fluid
+(eta = 10 Pa.s, rho = 1420 kg/m^3): far above the grid's numerical-viscosity floor,
+so eta is a meaningful physical parameter, and viscous enough that the stream never
+splashes -- which removes the impact-aeration artifact water-like pours show on this
+solver (splash-deposited beds the J-blind EOS freezes ~35% loose). The remaining
+volume excess is a ~1-cell loose crown, measured first-order in dx (1.060 at 128^3
+-> 1.036 at 192^3), hence the 192^3 default. Both
 glasses are kinematic revolved-SDF colliders with Newton-exact wrench accumulators:
 the held glass reads the wrist-load analog, the receiving glass is a SCALE -- its Fz
 growth is the transferred weight, cross-checked against the particle count each frame.
@@ -18,13 +22,14 @@ loudly if the audit ever grows past a fraction of the fill.
 
 Run:
   python examples/pour_franka.py --device cuda:0
-  python examples/pour_franka.py --device cuda:0 --fast          # coarse smoke run
+  python examples/pour_franka.py --device cuda:0 --fast          # coarse smoke run (96^3)
   python examples/pour_franka.py --device cuda:0 --skip-video    # metrics only
 
 Outputs (out/pour_franka/):
-  pour_franka.mp4    composite MuJoCo render: arm + glasses + water (60 fps)
+  pour_franka.mp4    composite MuJoCo render: arm + glasses + honey (60 fps)
   metrics.csv        per-frame region counts/fractions, tilt, wrenches, leak audit
   pour_metrics.png   receiver/spill fractions + glass wrenches vs time
+  final_*.npz        end-state particles for volume/bed-density analysis
   settled_*.npz      cached settled particle state (delete or --rebake to refresh)
 """
 from __future__ import annotations
@@ -62,16 +67,15 @@ PROFILE = GlassProfile()                                   # the Dogma95 glass
 RECEIVER_POS = np.array([0.34, -0.19, 0.12])
 Q_ID = np.array([1.0, 0.0, 0.0, 0.0])
 FILL_FRACTION = 0.80
-WATER = dict(eta=1.0e-3, density=1000.0, bulk_modulus=9.0e5)
-# fluid density-consistency correction (volume fix): repairs the aeration picked up at
-# stream breakup so settled LEVELS match the true volume (DFSPH enforces this exactly;
-# see level_volume). Tension-free form (target J capped at 1): loose beds are not
-# pulled together -- they just stop resisting the gravity that re-packs them.
-DENSITY_CORRECTION = 0.2                                   # per-substep blend rate
+# Real honey viscosity/density; bulk_modulus stays the artificial 9e5 (true K ~ 2 GPa
+# would cost ~50x the acoustic substeps; at pour speeds Ma < 0.1 the compressibility
+# error is < 1%). eta = 10 Pa.s sits far above the grid's numerical-viscosity floor
+# and suppresses the impact splash that aerates water-like pours on this solver.
+HONEY = dict(eta=10.0, density=1420.0, bulk_modulus=9.0e5)
 GLASS_FRICTION = 0.05                                      # Dogma95 coup_friction
 FPS = 60
 HOLD_SECONDS = 1.5    # keep filming after the return so the beds settle on camera
-LIQUID_RGBA = np.array([0.30, 0.62, 1.0, 1.0])
+LIQUID_RGBA = np.array([0.93, 0.66, 0.12, 1.0])
 GLASS_RGBA = (0.76, 0.92, 1.0, 0.30)                       # Dogma95 glass_surface
 HANDLE_RGBA = np.array([0.06, 0.07, 0.08, 1.0])
 BACKDROP_RGBA = np.array([0.24, 0.26, 0.30, 1.0])
@@ -85,8 +89,18 @@ GRID_LIM = 0.7
 WORLD_TO_MPM = np.array([0.16, 0.53, 0.02])                # floor z=0 -> 3.7 cells at 128
 
 
-def sound_speed() -> float:
-    return float(np.sqrt(1.1 * WATER["bulk_modulus"] / WATER["density"]))
+def sound_speed(liq: dict) -> float:
+    return float(np.sqrt(1.1 * liq["bulk_modulus"] / liq["density"]))
+
+
+def substeps_per_tick(liq: dict, dx: float, dt_tick: float) -> int:
+    """Acoustic CFL (0.28) plus the explicit-viscosity stability bound: the viscous
+    stress 2*eta*dev(D) is integrated explicitly, which needs dt <= rho*dx^2/(6*eta)
+    (3-D diffusion limit). Water never feels the second term; it overtakes the
+    acoustic bound around eta ~ 100 Pa.s at 128^3."""
+    acoustic = sound_speed(liq) / (0.28 * dx)
+    viscous = 6.0 * liq["eta"] / (liq["density"] * dx * dx)
+    return int(np.ceil(dt_tick * max(acoustic, viscous)))
 
 
 def build_scene(device: str, n_grid: int, arm: PandaPour):
@@ -97,7 +111,7 @@ def build_scene(device: str, n_grid: int, arm: PandaPour):
     pos = (cup_pos0 + pos_local @ quat_to_mat(cup_quat0).T + WORLD_TO_MPM).astype(np.float32)
 
     s = Solver(grid=grid, device=device).load_particles(pos, vol)
-    s.set_material(newtonian(**WATER), density_correction=DENSITY_CORRECTION)
+    s.set_material(newtonian(**HONEY))
     s.add_plane((0, 0, WORLD_TO_MPM[2]), (0, 0, 1), "separate", friction=0.3)
     s.add_domain_walls()
     src = s.add_cup(PROFILE, cup_pos0 + WORLD_TO_MPM, tuple(cup_quat0),
@@ -115,14 +129,14 @@ def settle(s: Solver, dt: float, substeps: int, seconds: float = 0.4) -> None:
 def level_volume(x_world, pos, quat, h: float) -> float:
     """APPARENT liquid volume in a glass from its fill level (robust 97th-pct depth,
     fillet-aware cavity volume). Compare with the count-implied volume: the ratio
-    exposes numerical AERATION -- splashed droplets separate while ballistic (an
-    isolated particle records no velocity gradient, so J stays ~1) and land as a
-    loose bed the EOS cannot see. The material volume sum(V0*J) itself stays
-    conserved to <0.1%. With the tension-free DENSITY_CORRECTION on, the bed
-    consolidates at gravity pace (no visible self-attraction) and this apparent/true
-    ratio ends the clip ~1.1 and keeps converging; with the correction off it
-    plateaus ~1.3. A DFSPH solver (the Genesis twin of this scene) reads ~1.0
-    instantly because it projects density to rho0 every step."""
+    exposes packing VOIDS the J-based EOS cannot see (sum(V0*J) itself conserves to
+    <0.1%). At water-like viscosity this exposed impact aeration -- splash-deposited
+    beds frozen ~1.3x loose -- which is why this example pours honey: the viscous
+    stream never splashes, and the residual excess is a ~1-cell loose crown that
+    converges first-order in dx (level asymptote 1.058 at 128^3 -> 1.008 at 192^3;
+    interior particles-per-cell on final_n*.npz is the exact bed-density instrument).
+    A DFSPH solver (the Genesis twin of this scene) reads 1.0 by construction.
+    """
     from warpmpm.colliders.glass import world_to_local
 
     m = cavity_mask(x_world + WORLD_TO_MPM, np.asarray(pos) + WORLD_TO_MPM, quat,
@@ -134,11 +148,11 @@ def level_volume(x_world, pos, quat, h: float) -> float:
     return PROFILE.cavity_volume(depth)
 
 
-def run(device: str = "cuda:0", n_grid: int = 128, video: bool = True,
+def run(device: str = "cuda:0", n_grid: int = 192, video: bool = True,
         rebake: bool = False, render_stride: int = 1) -> dict:
     OUT.mkdir(parents=True, exist_ok=True)
     mesh_path = write_glass_obj(PROFILE, OUT / "glass_render.obj")
-    arm = PandaPour(height=720, width=1280, max_geom=110000,  # every particle, no stride
+    arm = PandaPour(height=720, width=1280, max_geom=360000,  # every particle at 192^3
                     glass_mesh=mesh_path, glass_rgba=GLASS_RGBA)
     arm.set_glass_pose("glass_rcv", RECEIVER_POS, Q_ID)  # static receiver, set once
     arm.cam.lookat[:] = CAMERA["lookat"]
@@ -149,13 +163,13 @@ def run(device: str = "cuda:0", n_grid: int = 128, video: bool = True,
     s, grid, src, rcv, vol = build_scene(device, n_grid, arm)
     h = grid.dx / 2
     n0 = s.n_particles
-    m_water = float(WATER["density"] * vol.sum())
+    m_liq = float(HONEY["density"] * vol.sum())
     dt_tick = 1.0 / FPS
-    substeps = int(np.ceil(dt_tick * sound_speed() / (0.28 * grid.dx)))
+    substeps = substeps_per_tick(HONEY, grid.dx, dt_tick)
     dt = dt_tick / substeps
     n_frames = round((arm.duration + HOLD_SECONDS) * FPS)  # pose clamps home after duration
-    print(f"n_grid={n_grid} dx={grid.dx*1000:.2f}mm N={n0} water={m_water:.2f}kg "
-          f"dt={dt:.2e} ({substeps} substeps/frame, CFL={sound_speed()*dt/grid.dx:.2f}) "
+    print(f"n_grid={n_grid} dx={grid.dx*1000:.2f}mm N={n0} honey={m_liq:.2f}kg "
+          f"dt={dt:.2e} ({substeps} substeps/frame, CFL={sound_speed(HONEY)*dt/grid.dx:.2f}) "
           f"{n_frames} frames")
 
     # ---- settle (cached) --------------------------------------------------------------
@@ -186,6 +200,8 @@ def run(device: str = "cuda:0", n_grid: int = 128, video: bool = True,
     frames_dir = OUT / "_frames"
     if video:
         frames_dir.mkdir(exist_ok=True)
+        for stale in frames_dir.glob("f_*.png"):  # a rerun must not keep old tail frames
+            stale.unlink()
         import imageio.v2 as imageio
     rows = []
     max_embedded = 0
@@ -292,9 +308,9 @@ def run(device: str = "cuda:0", n_grid: int = 128, video: bool = True,
     ax = axes[1]
     ax.plot(r["t"], -r["src_fz"], label="held glass -Fz (load)", color="tab:green")
     ax.plot(r["t"], -r["rcv_fz"], label="receiver -Fz (scale)", color="tab:blue")
-    ax.axhline(9.81 * m_water, ls=":", color="k", label=f"total weight {9.81*m_water:.1f}N")
+    ax.axhline(9.81 * m_liq, ls=":", color="k", label=f"total weight {9.81*m_liq:.1f}N")
     # the scale cross-check: weight implied by the particle count in the receiver
-    ax.plot(r["t"], 9.81 * m_water * r["n_rcv"] / n0, "--", color="tab:cyan",
+    ax.plot(r["t"], 9.81 * m_liq * r["n_rcv"] / n0, "--", color="tab:cyan",
             label="receiver count * m*g/N (check)")
     ax.set_ylabel("force (N)")
     ax.legend(); ax.grid(alpha=0.3)
@@ -304,7 +320,7 @@ def run(device: str = "cuda:0", n_grid: int = 128, video: bool = True,
     ax.plot(r["t"], r["projected"], label="cumulative projected out", color="tab:orange")
     ax.set_xlabel("time (s)"); ax.set_ylabel("particles")
     ax.legend(); ax.grid(alpha=0.3)
-    fig.suptitle(f"Franka pour, MPM water (N={n0}, dx={grid.dx*1000:.1f}mm)")
+    fig.suptitle(f"Franka pour, MPM honey (N={n0}, dx={grid.dx*1000:.1f}mm)")
     fig.tight_layout()
     fig.savefig(OUT / "pour_metrics.png", dpi=130)
     plt.close(fig)
@@ -314,11 +330,17 @@ def run(device: str = "cuda:0", n_grid: int = 128, video: bool = True,
         import imageio.v2 as imageio
         mp4 = OUT / "pour_franka.mp4"
         with imageio.get_writer(mp4, fps=FPS // render_stride, codec="libx264",
-                                quality=8, macro_block_size=2) as wtr:
+                                quality=8, macro_block_size=2,
+                                # moov atom up front: streamable/previewable in IDEs
+                                output_params=["-movflags", "+faststart"]) as wtr:
             for p in sorted(frames_dir.glob("f_*.png")):
                 wtr.append_data(imageio.imread(p))
         print("wrote", mp4)
-    print("wrote", csv_path, "and", OUT / "pour_metrics.png")
+    # end-state particles for post-hoc volume analysis: the level metric over-reads on
+    # viscous mounds, so bed density must be read from particles-per-cell, not levels
+    final_npz = OUT / f"final_n{n_grid}.npz"
+    np.savez_compressed(final_npz, x=s.x(), v=s.v(), vol=vol, rho0=HONEY["density"])
+    print("wrote", csv_path, "and", OUT / "pour_metrics.png", "and", final_npz.name)
     print(f"final: receiver {r['frac_rcv'][-1]*100:.1f}% spill/air {r['frac_spill'][-1]*100:.1f}% "
           f"| max embedded ever {max_embedded} | total projected {proj_total}")
     arm.close()
@@ -328,7 +350,7 @@ def run(device: str = "cuda:0", n_grid: int = 128, video: bool = True,
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--device", default="cuda:0", help="Warp device, e.g. cuda:0 or cuda:1")
-    ap.add_argument("--n-grid", type=int, default=128)
+    ap.add_argument("--n-grid", type=int, default=192)
     ap.add_argument("--fast", action="store_true", help="coarse smoke run (n_grid 96)")
     ap.add_argument("--skip-video", action="store_true")
     ap.add_argument("--rebake", action="store_true", help="refresh the settled cache")
