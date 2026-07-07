@@ -17,6 +17,7 @@ import warp as wp
 from warpmpm.kernels import MPM_Simulator_WARP
 
 _INITED = False
+_DEVICE_ANNOUNCED = False   # print the auto-resolved device once per process
 
 
 def _ensure_warp() -> None:
@@ -64,6 +65,10 @@ class Solver:
         _ensure_warp()
         if self.device == "auto":
             self.device = "cuda:0" if wp.get_cuda_device_count() > 0 else "cpu"
+            global _DEVICE_ANNOUNCED
+            if not _DEVICE_ANNOUNCED:
+                _DEVICE_ANNOUNCED = True
+                print(f"warpmpm: device auto -> {self.device}")
         self._vol0 = vol.astype(np.float32).copy()
         self._sim = MPM_Simulator_WARP(len(pos), device=self.device)
         self._sim.load_initial_data_from_torch(
