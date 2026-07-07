@@ -30,7 +30,7 @@ OUT = Path(__file__).resolve().parents[1] / "out"
 
 
 def run(n_grid=48, ticks=50, substeps=30, dt=2.0e-5, render_every=1,
-        clearance=0.02, press=0.05, device="cuda:0"):
+        clearance=0.02, press=0.05, device="auto"):
     grid = GridConfig(n_grid=n_grid, grid_lim=0.4)
     dough_size = (0.12, 0.10, 0.07)
     pos, vol, floor = block(grid, size=dough_size, ppc=2)

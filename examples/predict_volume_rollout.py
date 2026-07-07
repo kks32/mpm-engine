@@ -42,7 +42,7 @@ LAWS = {
 
 
 def squeeze_dump(tau_y, eta, geom, n_grid=52, v_plate=0.08, press_strain=0.5,
-                 dt=1.0e-4, substeps=20, frame_stride=2, device="cuda:0"):
+                 dt=1.0e-4, substeps=20, frame_stride=2, device="auto"):
     """Forward squeeze of a `geom` dough blob; return (X[F,N,3], times) of dough particles."""
     grid = GridConfig(n_grid=n_grid, grid_lim=0.4)
     cw, cd, ch = geom
@@ -120,7 +120,7 @@ def render_speckle(X, times, bbox, out_dir, stem, width=520, dot_px=3.2, margin=
     return str(cam)
 
 
-def run(geom=(0.16, 0.16, 0.06), n_grid=52, query_spacing=9, device="cuda:0"):
+def run(geom=(0.16, 0.16, 0.06), n_grid=52, query_spacing=9, device="auto"):
     from perception.track import track as cotracker_track
     OUT.mkdir(parents=True, exist_ok=True)
     print(f"unseen volume {geom} (V={np.prod(geom)*1e6:.0f} cm^3); identified on "

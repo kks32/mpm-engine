@@ -41,7 +41,7 @@ def _box_edges(c, h):
 
 
 def run(n_grid=48, ticks=60, substeps=40, dt=2.0e-5, press_depth=0.025,
-        render_every=2, device="cuda:0"):
+        render_every=2, device="auto"):
     grid = GridConfig(n_grid=n_grid, grid_lim=0.4)
     dough_size = (0.12, 0.08, 0.06)
     pos, vol, floor = block(grid, size=dough_size, ppc=2)

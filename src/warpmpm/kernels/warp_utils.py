@@ -168,6 +168,37 @@ class RevolvedCollider:
     torque: wp.array(dtype=wp.vec3)  # sum of (x_node - point) x impulse
 
 
+@wp.struct
+class SDFCollider:
+    # a watertight mesh represented as a stored signed-distance field in its body frame:
+    # negative inside the solid, positive outside. The collider may translate and rotate; the
+    # field is queried by mapping each grid node into the body frame and trilinearly
+    # interpolating sdf_val (distance) and sdf_grad (outward gradient).
+    sdf_val: wp.array(dtype=float, ndim=3)
+    sdf_grad: wp.array(dtype=wp.vec3, ndim=3)
+    res: int
+    origin: wp.vec3          # body-frame coordinate of voxel index (0,0,0)
+    cell: float              # body-frame metres per voxel (isotropic)
+
+    center: wp.vec3          # world position of the body-frame origin (pivot)
+    quat: wp.quat            # orientation body -> world
+    velocity: wp.vec3        # linear velocity of the pivot (world)
+    omega: wp.vec3           # angular velocity (world)
+
+    band: float              # contact band thickness (world metres); constrain nodes with sd < band
+    surface_type: int        # 0 sticky, 1 slip (frictionless), 2 separable + Coulomb friction
+    friction: float
+
+    start_time: float
+    end_time: float
+
+    # Newton-exact reaction accumulators (impulse the material delivers to the collider, world
+    # frame): force = sum_nodes m*(v_free - v_new); torque = sum_nodes (x - center) x impulse.
+    # Reaction wrench = (force, torque) / elapsed dt.
+    force: wp.array(dtype=wp.vec3)
+    torque: wp.array(dtype=wp.vec3)
+
+
 
 @wp.struct
 class Impulse_modifier:

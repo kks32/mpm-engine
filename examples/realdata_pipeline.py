@@ -50,7 +50,7 @@ def _savej(p, obj):
 
 # ----------------------------------------------------------------------------- dataset gen
 def make_dataset(scale, tag, n_grid=64, v_plate=0.08, press_strain=0.5, dt=1.0e-4,
-                 substeps=20, frame_stride=3, width=520, device="cuda:0"):
+                 substeps=20, frame_stride=3, width=520, device="auto"):
     """Quasi-2D plane-strain squeeze; write a real-data-shaped dataset: textured-surface ortho
     frames + cam.json (perception.track homography) + force.csv (measured) + meta.json."""
     import matplotlib
@@ -216,7 +216,7 @@ def identify(tag, t_lo_frac=0.12, t_hi_frac=0.92, reuse_tracks=True):
 
 
 def _slab_force_series(scale, tau_y, eta, n_grid=64, v_plate=0.08, press_strain=0.5,
-                       dt=1.0e-4, substeps=20, device="cuda:0"):
+                       dt=1.0e-4, substeps=20, device="auto"):
     """Re-sim the same quasi-2D slab squeeze with a given law; return (strain%, |Fz|)."""
     grid = GridConfig(n_grid=n_grid, grid_lim=0.4); dx = grid.dx; s_lin = float(scale) ** 0.5
     col_w = 0.13 * s_lin; col_h = 0.06 * s_lin; slab = 6 * dx; cx = cy = 0.2; floor = 3 * dx
@@ -249,7 +249,7 @@ def _slab_force_series(scale, tau_y, eta, n_grid=64, v_plate=0.08, press_strain=
     return np.array(st), np.array(Fz)
 
 
-def rollout_error(tag, device="cuda:0"):
+def rollout_error(tag, device="auto"):
     """Re-sim the RECOVERED law and compare its force rollout to ground truth -- the metric
     that matters (tau_y/eta trade off; what counts is reproducing the dynamics)."""
     r = _loadj(OUT / tag / "identify.json")
@@ -265,7 +265,7 @@ def rollout_error(tag, device="cuda:0"):
             "law": (r["tau_y_hat"], r["eta_hat"])}
 
 
-def eval_rollout(tags=("vol_1x", "vol_1p5x"), device="cuda:0"):
+def eval_rollout(tags=("vol_1x", "vol_1p5x"), device="auto"):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -289,7 +289,7 @@ def eval_rollout(tags=("vol_1x", "vol_1p5x"), device="cuda:0"):
     return res
 
 
-def run(device="cuda:0"):
+def run(device="auto"):
     OUT.mkdir(parents=True, exist_ok=True)
     make_dataset(1.0, "vol_1x", device=device); identify("vol_1x")
     make_dataset(1.5, "vol_1p5x", device=device); identify("vol_1p5x")
@@ -298,6 +298,6 @@ def run(device="cuda:0"):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--device", default="cuda:0", help="Warp device, e.g. cuda:0 or cuda:1")
+    parser.add_argument("--device", default="auto", help="Warp device: auto (cuda if available), cuda:N, or cpu")
     args = parser.parse_args()
     run(device=args.device)

@@ -80,7 +80,7 @@ def _build_slab(grid: GridConfig):
 
 def shear_segment(v_shear, material, n_frames, dt=1.0e-4, substeps=20,
                   record_power=False, record_pos=False, record_stress=False,
-                  device="cuda:0"):
+                  device="auto"):
     """Run one shear-cell segment with `material` at top-wall speed v_shear.
 
     Returns dict: t[], Fx[], Fz[], gd_pct[] and, if record_power, per-frame v/L/vol/KE for the
@@ -213,7 +213,7 @@ def viscous_prior(fe, s_grid, n=800, seed=0):
 
 
 def run(speeds=(0.006, 0.012, 0.025, 0.05, 0.1, 0.2, 0.4, 0.8), v_holdout=0.16,
-        rho=0.1, device="cuda:0"):
+        rho=0.1, device="auto"):
     from ident.features.function_encoder import FunctionEncoderDict
     from ident.solve.qp import constrained_solve
     OUT.mkdir(parents=True, exist_ok=True)
@@ -364,7 +364,7 @@ def _shear_profile(seg, nbins=12):
     return prof, zc
 
 
-def probe(device="cuda:0"):
+def probe(device="auto"):
     t0 = time.time()
     mat = (newtonian(eta=TRUTH["eta"], density=RHO, bulk_modulus=9.0e5)
            .with_yield(TRUTH["tau_y"]).with_powerlaw(K=TRUTH["pk"], n=TRUTH["pn"]))

@@ -82,7 +82,7 @@ def power_balance_identify(rec: dict, v_plate: float, frame_dt: float,
 
 def run(n_grid=48, v_plate=0.08, eta=40.0, tau_y=200.0, density=1000.0, bulk=9.0e5,
         press_strain=0.5, dt=1.0e-4, substeps=20, render=True, render_every=3,
-        out_name="squeeze_plate_franka.mp4", device="cuda:0"):
+        out_name="squeeze_plate_franka.mp4", device="auto"):
     grid = GridConfig(n_grid=n_grid, grid_lim=0.4)
     col_w, col_d, col_h = 0.12, 0.12, 0.06
     pos, vol0, floor = block(grid, size=(col_w, col_d, col_h), ppc=2)
@@ -286,7 +286,7 @@ def _figure(rec, ident, res, path):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--device", default="cuda:0", help="Warp device, e.g. cuda:0 or cuda:1")
+    parser.add_argument("--device", default="auto", help="Warp device: auto (cuda if available), cuda:N, or cpu")
     parser.add_argument("--no-render", action="store_true", help="skip video/figure rendering")
     args = parser.parse_args()
     run(device=args.device, render=not args.no_render)

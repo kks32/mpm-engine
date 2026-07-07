@@ -50,7 +50,7 @@ def _dev(T):
 
 def probe(G_true_E=5e5, nu=0.30, yield_true=3000.0, density=1000.0, bulk=9e5,
           n_grid=32, ppc=2, v_plate=0.08, n_frames=220, sub=4, compress=0.014,
-          size=(0.12, 0.08, 0.06), device="cuda:0"):
+          size=(0.12, 0.08, 0.06), device="auto"):
     """Run one squeeze probe; return per-frame power-balance quantities. `size` sets the block
     (object instance) -- the identified (G, yield) is a MATERIAL property and must not depend on it."""
     g = GridConfig(n_grid=n_grid, grid_lim=0.30)
@@ -119,7 +119,7 @@ def identify(rec, elastic_frac=0.06, plastic_frac=0.40):
                 elastic_frames=[0, ne], plastic_frames=[npl0, n])
 
 
-def run(device="cuda:0"):
+def run(device="auto"):
     print("=== #75 force-based von-Mises (G, yield) identification from one squeeze ===", flush=True)
     rec = probe(device=device)
     meta = rec["_meta"]
@@ -151,6 +151,6 @@ def run(device="cuda:0"):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--device", default="cuda:0", help="Warp device, e.g. cuda:0 or cuda:1")
+    parser.add_argument("--device", default="auto", help="Warp device: auto (cuda if available), cuda:N, or cpu")
     args = parser.parse_args()
     run(device=args.device)

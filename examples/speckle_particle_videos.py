@@ -22,7 +22,7 @@ OUT = Path(__file__).resolve().parents[1] / "out" / "speckle_particles"
 
 
 def dump_slab(scale, n_grid=64, v_plate=0.08, press_strain=0.5, dt=1.0e-4,
-              substeps=20, frame_stride=3, device="cuda:0"):
+              substeps=20, frame_stride=3, device="auto"):
     """Quasi-2D plane-strain squeeze; record particle positions x[F,N,3] + times."""
     grid = GridConfig(n_grid=n_grid, grid_lim=0.4); dx = grid.dx; s_lin = float(scale) ** 0.5
     col_w = 0.13 * s_lin; col_h = 0.06 * s_lin; slab = 6 * dx; cx = cy = 0.2; floor = 3 * dx
@@ -55,7 +55,7 @@ def dump_slab(scale, n_grid=64, v_plate=0.08, press_strain=0.5, dt=1.0e-4,
     return np.array(X), np.array(T)
 
 
-def run(device="cuda:0"):
+def run(device="auto"):
     from perception.render_collapse3d_speckle import render
     OUT.mkdir(parents=True, exist_ok=True)
     out = {}

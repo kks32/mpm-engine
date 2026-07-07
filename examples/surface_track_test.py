@@ -83,7 +83,7 @@ def _cotrack(fdir, spacing=10, device="cpu"):
     return tr[0].cpu().numpy(), vis[0].cpu().numpy()
 
 
-def run(geom=(0.16, 0.16, 0.06), n_grid=52, nframes=22, device="cuda:0"):
+def run(geom=(0.16, 0.16, 0.06), n_grid=52, nframes=22, device="auto"):
     OUT.mkdir(parents=True, exist_ok=True)
     grid = GridConfig(n_grid=n_grid, grid_lim=0.4)
     cw, cd, ch = geom

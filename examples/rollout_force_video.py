@@ -22,7 +22,7 @@ LAWS = {"truth": (200.0, 40.0), "learned": (192.0, 55.0)}
 
 
 def force_series(tau_y, eta, geom, n_grid=52, v_plate=0.08, press_strain=0.5,
-                 dt=1.0e-4, substeps=20, frame_stride=3, device="cuda:0"):
+                 dt=1.0e-4, substeps=20, frame_stride=3, device="auto"):
     """Re-run the squeeze; record (strain%, grid-impulse |Fz|) at the rendered frames."""
     grid = GridConfig(n_grid=n_grid, grid_lim=0.4)
     cw, cd, ch = geom
@@ -55,7 +55,7 @@ def force_series(tau_y, eta, geom, n_grid=52, v_plate=0.08, press_strain=0.5,
     return np.array(strain), np.array(Fz)
 
 
-def run(geom=(0.16, 0.16, 0.06), device="cuda:0"):
+def run(geom=(0.16, 0.16, 0.06), device="auto"):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -118,6 +118,6 @@ def run(geom=(0.16, 0.16, 0.06), device="cuda:0"):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--device", default="cuda:0", help="Warp device, e.g. cuda:0 or cuda:1")
+    parser.add_argument("--device", default="auto", help="Warp device: auto (cuda if available), cuda:N, or cpu")
     args = parser.parse_args()
     run(device=args.device)

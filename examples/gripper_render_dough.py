@@ -159,7 +159,7 @@ def render(frames, target, mp4, dx, floor, fps=12, turntable=48):
     return mp4
 
 
-def main(mode="plan", device="cuda:0"):
+def main(mode="plan", device="auto"):
     import json
     print(f"=== dough-style gripper-shaping render (mode={mode}) ===", flush=True)
     sc = GripperShapeScene(device=device)
@@ -178,6 +178,6 @@ def main(mode="plan", device="cuda:0"):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Render smooth paper-style gripper shaping videos.")
     parser.add_argument("mode", nargs="?", default="plan", choices=("plan", "t"))
-    parser.add_argument("--device", default="cuda:0", help="Warp device, e.g. cuda:0 or cuda:1")
+    parser.add_argument("--device", default="auto", help="Warp device: auto (cuda if available), cuda:N, or cpu")
     args = parser.parse_args()
     main(mode=args.mode, device=args.device)

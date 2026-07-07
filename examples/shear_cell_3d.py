@@ -53,7 +53,7 @@ def _build_block(grid: GridConfig):
 
 def shear_segment(v_shear, material, n_frames, dt=1.0e-4, substeps=20,
                   record_power=False, record_traj=False, traj_stride=2,
-                  record_stress=False, device="cuda:0"):
+                  record_stress=False, device="auto"):
     """One 3D shear segment. record_power -> per-frame (diss rows); record_traj -> store
     x[F,N,3], v[F,N,3], times, Fx[F] for rendering; record_stress -> per-frame per-particle
     (gd, vol, sigma_dev:D_dev) for the STRONG-form (pointwise constitutive) recovery."""
@@ -125,7 +125,7 @@ def _truth_material():
 
 
 def run(speeds=(0.006, 0.012, 0.025, 0.05, 0.1, 0.2, 0.4, 0.8), v_holdout=0.16,
-        rho=0.1, device="cuda:0"):
+        rho=0.1, device="auto"):
     from ident.features.function_encoder import FunctionEncoderDict
     from ident.solve.qp import constrained_solve
     OUT.mkdir(parents=True, exist_ok=True)
@@ -290,7 +290,7 @@ def replot():
             float(r["v_holdout"]))
 
 
-def probe(device="cuda:0"):
+def probe(device="auto"):
     OUT.mkdir(parents=True, exist_ok=True)
     t0 = time.time()
     res = shear_segment(0.1, _truth_material(), n_frames=60, record_power=True,

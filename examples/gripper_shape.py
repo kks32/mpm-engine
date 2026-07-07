@@ -34,7 +34,7 @@ def chamfer(a, b):
 
 class GripperShapeScene:
     def __init__(self, n_grid=32, grid_lim=0.30, size=(0.12, 0.08, 0.06), center=(0.15, 0.15, 0.05),
-                 ppc=2, m_match=300, seed=0, device="cuda:0"):
+                 ppc=2, m_match=300, seed=0, device="auto"):
         self.g = GridConfig(n_grid=n_grid, grid_lim=grid_lim)
         self.device = device
         self.pos0, self.vol0, self.floor = block(self.g, size=size, center=center, ppc=ppc, seed=seed)
@@ -181,7 +181,7 @@ def _topdown_png(clouds_labels, path, lim=0.30):
     fig.tight_layout(); fig.savefig(path, dpi=130); print(f"figure -> {path}", flush=True)
 
 
-def demo(device="cuda:0"):
+def demo(device="auto"):
     print("=== gripper shaping demo (identified MPM): x-pinch then y-pinch ===", flush=True)
     sc = GripperShapeScene(device=device)
     grips = [("x", 0.15, 0.15, 0.06), ("y", 0.15, 0.15, 0.06)]
@@ -214,7 +214,7 @@ def cem_plan_grips(sc, target, params=None, axes=("x", "y"), pop=12, elite=4, n_
     return _grips_from_vec(best, axes), best_v
 
 
-def plan(device="cuda:0"):
+def plan(device="auto"):
     """End-to-end: a target is made by a reference grip sequence (TRUE law); the gripper planner
     reaches it THROUGH THE IDENTIFIED LAW; executed in the TRUE engine. Closes the press->identify->
     gripper-shape loop."""
@@ -250,7 +250,7 @@ def _t_target(sc, n=320, seed=0):
     return np.array(pts, np.float32)
 
 
-def tshape(pop=10, elite=3, n_iter=3, seed=1, device="cuda:0"):
+def tshape(pop=10, elite=3, n_iter=3, seed=1, device="auto"):
     """Plan localized x-pinches at low y to carve a T (stem) while the top stays wide (bar). CEM over
     (cy, gap, perp_half) for 2 grips, seeded at the working prototype."""
     import json
@@ -284,7 +284,7 @@ def tshape(pop=10, elite=3, n_iter=3, seed=1, device="cuda:0"):
     return grips
 
 
-def video(device="cuda:0"):
+def video(device="auto"):
     """Render the PLANNED grips (from plan.json) as an MP4: gripper fingers close, dough deforms,
     target shown alongside."""
     import json
@@ -305,7 +305,7 @@ def video(device="cuda:0"):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("which", nargs="?", default="demo", choices=("demo", "plan", "video", "tshape"))
-    parser.add_argument("--device", default="cuda:0", help="Warp device, e.g. cuda:0 or cuda:1")
+    parser.add_argument("--device", default="auto", help="Warp device: auto (cuda if available), cuda:N, or cpu")
     args = parser.parse_args()
     if args.which == "demo":
         demo(device=args.device)

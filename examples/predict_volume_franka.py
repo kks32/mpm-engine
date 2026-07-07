@@ -35,7 +35,7 @@ LAWS = {
 
 
 def press_force(tau_y, eta, geom, n_grid=56, v_plate=0.08, press_strain=0.5,
-                dt=1.0e-4, substeps=20, density=1000.0, device="cuda:0"):
+                dt=1.0e-4, substeps=20, density=1000.0, device="auto"):
     """Forward sim: squeeze a dough blob of size `geom` and return (strain%, F_z grid-impulse,
     final 95th-pct radial spread)."""
     grid = GridConfig(n_grid=n_grid, grid_lim=0.4)
@@ -70,7 +70,7 @@ def press_force(tau_y, eta, geom, n_grid=56, v_plate=0.08, press_strain=0.5,
     return np.array(strain), np.array(Fz), spread
 
 
-def run(geom=(0.16, 0.16, 0.06), n_grid=56, device="cuda:0"):
+def run(geom=(0.16, 0.16, 0.06), n_grid=56, device="auto"):
     print(f"unseen volume {geom} (V={np.prod(geom)*1e6:.0f} cm^3) vs identified "
           f"0.12x0.12x0.07 (V={0.12*0.12*0.07*1e6:.0f} cm^3)\n")
     results = {}
@@ -119,6 +119,6 @@ def run(geom=(0.16, 0.16, 0.06), n_grid=56, device="cuda:0"):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--device", default="cuda:0", help="Warp device, e.g. cuda:0 or cuda:1")
+    parser.add_argument("--device", default="auto", help="Warp device: auto (cuda if available), cuda:N, or cpu")
     args = parser.parse_args()
     run(device=args.device)

@@ -794,7 +794,7 @@ def run(args) -> list[dict]:
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Sweep applied pressure and plot parameter covariance.")
-    parser.add_argument("--device", default="cuda:0", help="Warp device, e.g. cuda:0 or cuda:1")
+    parser.add_argument("--device", default="auto", help="Warp device: auto (cuda if available), cuda:N, or cpu")
     parser.add_argument("--targets", nargs="+", type=float,
                         default=[
                             225.0, 180.0, 146.25, 101.25, 72.0, 56.25, 45.0,

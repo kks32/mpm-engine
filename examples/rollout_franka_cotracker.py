@@ -58,7 +58,7 @@ def _cotrack(frames_dir, spacing=7, device="cpu"):
 
 def squeeze_composite(arm, ee, tau_y, eta, geom, stem, n_grid=52, v_plate=0.08,
                       press_strain=0.5, dt=1.0e-4, substeps=20, frame_stride=3,
-                      device="cuda:0"):
+                      device="auto"):
     """Run the squeeze for one law and render the composite (arm + plate + speckled dough)."""
     import matplotlib
     matplotlib.use("Agg")
@@ -114,7 +114,7 @@ def squeeze_composite(arm, ee, tau_y, eta, geom, stem, n_grid=52, v_plate=0.08,
     return str(fdir)
 
 
-def run(geom=(0.16, 0.16, 0.06), n_grid=52, width=720, height=520, device="cuda:0"):
+def run(geom=(0.16, 0.16, 0.06), n_grid=52, width=720, height=520, device="auto"):
     OUT.mkdir(parents=True, exist_ok=True)
     arm = FrankaArm(height=height, width=width, hide_gripper=True)
     # shared EE-inversion + fixed camera (identical arm motion for every law)

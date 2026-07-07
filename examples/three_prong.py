@@ -28,7 +28,7 @@ ANGLES = np.deg2rad([90.0, 210.0, 330.0])                 # three prongs, 120 de
 
 class ThreeProngScene:
     def __init__(self, n_grid=32, grid_lim=0.30, size=(0.09, 0.09, 0.05),
-                 center=(0.15, 0.15, 0.045), ppc=2, seed=0, device="cuda:0"):
+                 center=(0.15, 0.15, 0.045), ppc=2, seed=0, device="auto"):
         self.g = GridConfig(n_grid=n_grid, grid_lim=grid_lim)
         self.device = device
         self.pos0, self.vol0, self.floor = block(self.g, size=size, center=center, ppc=ppc, seed=seed)
@@ -100,7 +100,7 @@ def lobedness(x0, xf, cx, cy):
     return mode3(th, r0), mode3(th, rf)
 
 
-def main(device="cuda:0"):
+def main(device="auto"):
     OUT.mkdir(parents=True, exist_ok=True)
     sc = ThreeProngScene(device=device)
     print(f"=== 3-prong gripper on dough (N={sc.N} particles, law={ID_LAW}) ===", flush=True)
@@ -150,6 +150,6 @@ def _figure(x0, xf, frames, sc, path):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--device", default="cuda:0", help="Warp device, e.g. cuda:0 or cuda:1")
+    parser.add_argument("--device", default="auto", help="Warp device: auto (cuda if available), cuda:N, or cpu")
     args = parser.parse_args()
     main(device=args.device)

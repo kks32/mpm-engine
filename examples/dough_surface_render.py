@@ -50,7 +50,7 @@ def _box_polys(cx, cy, cz, hx, hy, hz):
 
 def run(tau_y=200.0, eta=40.0, geom=(0.16, 0.16, 0.06), n_grid=52, v_plate=0.08,
         press_strain=0.5, dt=1.0e-4, substeps=20, frame_stride=6, still_frac=0.55,
-        speckle_tex=True, device="cuda:0"):
+        speckle_tex=True, device="auto"):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt

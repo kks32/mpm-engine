@@ -37,7 +37,7 @@ TRUE = dict(E=5e5, nu=0.30, yield_stress=3000.0)
 
 # --------------------------------------------------------------------------- warp data generation
 def _rollout(action, size=(0.12, 0.08, 0.06), n_grid=32, ppc=2, n_frames=60, sub=4,
-             params=None, sub_idx=None, seed=0, device="cuda:0"):
+             params=None, sub_idx=None, seed=0, device="auto"):
     """One warp von-Mises press; record subsampled particle positions per frame + tool center."""
     p = dict(TRUE);
     if params: p.update(params)
@@ -63,7 +63,7 @@ def _rollout(action, size=(0.12, 0.08, 0.06), n_grid=32, ppc=2, n_frames=60, sub
     return np.array(traj, np.float32), np.array(tool, np.float32), sub_idx, dx
 
 
-def gen(K=40, n_frames=60, out=OUT, device="cuda:0"):
+def gen(K=40, n_frames=60, out=OUT, device="auto"):
     """Generate K rollouts with random press actions (the GNS training set)."""
     out = Path(out); out.mkdir(parents=True, exist_ok=True)
     rng = np.random.default_rng(1)
@@ -189,7 +189,7 @@ def gns_rollout(trained, init_pos, action, tool0_z, n_frames=60, dt_ctrl=8e-4):
     return pos.numpy()
 
 def _test_rollouts(sub_idx, actions, size=(0.12, 0.08, 0.06), params=None, n_frames=60,
-                   device="cuda:0"):
+                   device="auto"):
     """Warp rollouts for a set of (held-out) actions, recording subsampled final positions."""
     finals = []
     for a in actions:
@@ -199,7 +199,7 @@ def _test_rollouts(sub_idx, actions, size=(0.12, 0.08, 0.06), params=None, n_fra
     return finals
 
 
-def compare(Ks=(2, 5, 10, 20, 40), n_test=4, epochs=40, device="cuda:0"):
+def compare(Ks=(2, 5, 10, 20, 40), n_test=4, epochs=40, device="auto"):
     """Data-efficiency head-to-head: GNS prediction error vs #training rollouts K, against the
     one-probe identified MPM (K-independent). Plus a cross-size transfer probe."""
     import json

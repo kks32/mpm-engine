@@ -25,7 +25,7 @@ OUT = Path(__file__).resolve().parents[1] / "out"
 
 
 def run(n_grid=44, frames=70, substeps=20, dt=1.0e-4, v_plate=0.08, settle=220,
-        every=2, device="cuda:0"):
+        every=2, device="auto"):
     grid = GridConfig(n_grid=n_grid, grid_lim=0.4)
     ds = (0.12, 0.12, 0.07)
     pos, vol, floor = block(grid, size=ds, ppc=2)
@@ -90,6 +90,6 @@ def run(n_grid=44, frames=70, substeps=20, dt=1.0e-4, v_plate=0.08, settle=220,
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--device", default="cuda:0", help="Warp device, e.g. cuda:0 or cuda:1")
+    parser.add_argument("--device", default="auto", help="Warp device: auto (cuda if available), cuda:N, or cpu")
     args = parser.parse_args()
     run(device=args.device)

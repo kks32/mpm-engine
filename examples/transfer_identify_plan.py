@@ -38,7 +38,7 @@ def _law(idres):
 
 
 def run(A=(0.09, 0.06, 0.045), B=(0.12, 0.08, 0.06), a_ref=(0.30, 0.18),
-        device="cuda:0"):
+        device="auto"):
     print("=== #74 identify-on-A, plan-on-B transfer (von-Mises) ===", flush=True)
     # 1. identify on both sizes -> the recovered yield should be size-independent
     idA = identify(probe(size=A, n_frames=180, device=device))
@@ -83,6 +83,6 @@ def run(A=(0.09, 0.06, 0.045), B=(0.12, 0.08, 0.06), a_ref=(0.30, 0.18),
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--device", default="cuda:0", help="Warp device, e.g. cuda:0 or cuda:1")
+    parser.add_argument("--device", default="auto", help="Warp device: auto (cuda if available), cuda:N, or cpu")
     args = parser.parse_args()
     run(device=args.device)

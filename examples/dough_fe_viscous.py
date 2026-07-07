@@ -48,7 +48,7 @@ def _gd(L):
 
 
 def squeeze(v_plate, fe, n_grid=48, geom=(0.12, 0.12, 0.06), press_strain=0.5,
-            dt=1.0e-4, substeps=20, frame_stride=3, device="cuda:0"):
+            dt=1.0e-4, substeps=20, frame_stride=3, device="auto"):
     """One 3D squeeze; per frame return (diss, X_fe[K], X_bing[2], gd-percentiles)."""
     grid = GridConfig(n_grid=n_grid, grid_lim=0.4)
     cw, cd, ch = geom
@@ -117,7 +117,7 @@ def viscous_prior(fe, s_grid, n=800, seed=0):
     return tbar, cov
 
 
-def run(device="cuda:0"):
+def run(device="auto"):
     from ident.features.function_encoder import FunctionEncoderDict
     OUT.mkdir(parents=True, exist_ok=True)
     d = np.load(REPO / "mpm_engine/fe-weights/viscous.npz")

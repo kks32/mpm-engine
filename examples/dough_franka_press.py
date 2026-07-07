@@ -33,7 +33,7 @@ OUT = Path(__file__).resolve().parents[1] / "out"
 def run(n_grid=48, ticks=130, substeps=24, dt=2.0e-5, f_target=40.0, v_max=0.45,
         damping=None, allow_retract=False, eta=80.0, tau_y=900.0, density=1200.0,
         clearance=0.006, f_lowpass=0.25, render=True, out_name="dough_franka_press.mp4",
-        device="cuda:0"):
+        device="auto"):
     grid = GridConfig(n_grid=n_grid, grid_lim=0.4)
     dough_size = (0.12, 0.10, 0.07)
     pos, vol, floor = block(grid, size=dough_size, ppc=2)
@@ -166,7 +166,7 @@ def run(n_grid=48, ticks=130, substeps=24, dt=2.0e-5, f_target=40.0, v_max=0.45,
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--device", default="cuda:0", help="Warp device, e.g. cuda:0 or cuda:1")
+    parser.add_argument("--device", default="auto", help="Warp device: auto (cuda if available), cuda:N, or cpu")
     parser.add_argument("--no-render", action="store_true", help="skip video rendering")
     args = parser.parse_args()
     m = run(device=args.device, render=not args.no_render)
