@@ -23,25 +23,18 @@ What exists today:
 - `core/solver.py` — CUDA-default `Solver` (`cuda:0`; pass `device="cuda:1"` for the
   second GPU or `device="cpu"` for CPU fallback) (load / material / collider / step / export) +
   `GridConfig`. The kinematic box collider lives here as `Solver.add_box` / `set_box`
-  (the robot end-effector proxy); the kinematic 6-DoF glass collider as `Solver.add_cup` /
-  `set_cup` / `cup_wrench` (analytic revolved SDF, separable Coulomb contact + anti-tunneling
-  core, Newton-exact reaction force AND torque).
+  (the robot end-effector proxy).
 - `materials/` — composable presets: `newtonian`, `granular`, `elastic`, `dough` (each
   `.resolve()`s to the fork's (name, params)).
-- `colliders/` — host-side collider geometry: `glass.py` (GlassProfile, reference SDF,
-  containment/leak masks, cavity fill sampler, leak-projection rescue net).
 - `coupling/wrench.py` — `box_contact_wrench`: stress-integral reaction wrench (Newton's
   third law), the cross-validation baseline.
-- `adapters/mujoco_adapter.py` — `FrankaArm`: scripted Panda descent + composite render;
-  `PandaPour`: the Dogma95-ported pour kinematics (FK bit-identical to the Genesis panda).
+- `adapters/mujoco_adapter.py` — `FrankaArm`: scripted Panda descent + composite render.
 - `scenes.py` — `block`, `dough` scene builders.
-- `examples/pour_franka.py` — Franka pours MPM honey glass-to-glass (192^3), action +
-  geometry identical to the Dogma95 Genesis/SPH pouring study (cross-simulator
-  comparable); volume fidelity of the bed is measured, first-order in dx.
-- `tests/`, `benchmarks/` — conservation + sanity (incl. cup containment / pour); ms/step.
+- `examples/pour_franka.py` — Franka glass-to-glass pouring example.
+- `tests/`, `benchmarks/` — conservation + sanity; ms/step.
 
-Planned (stubs today): capsule/sphere SDF colliders and a baked mesh-SDF collider for
-non-revolved tools, a unified `coupling.WarpMPMBackend` 6-DoF tool surface, `render/`.
+Planned (empty stubs today): `colliders/` (capsule/sphere SDFs), a unified
+`coupling.WarpMPMBackend` (set_robot_kinematics / step / get_link_wrenches), `render/`.
 See the Roadmap.
 
 ## Quickstart
