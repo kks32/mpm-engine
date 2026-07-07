@@ -144,9 +144,19 @@ is a no-op either way, which is why Steps 1 and 2 are testable on the Mac first.
    IMPLEMENTED (dark, per this design): segment A = zero/stress/p2g/normalize(+damping),
    segment B = g2p, both at full grid dims; first substep runs live to JIT-load modules;
    any capture error falls back to live launches. sim.use_cuda_graph=False disables.
-   PENDING GPU VALIDATION: run `pytest tests/test_cuda_graph.py -v` on the CUDA box
-   (equivalence vs live + a substep-time benchmark); the tests skip without CUDA.
-3. bench_step before and after on the GPU box; gate: existing suite green on CPU and GPU.
+   GPU VALIDATED (TACC Vista GH200, July 2026): full suite 43/43 green on cuda:0;
+   test_cuda_graph benchmark 0.076 ms/substep with graphs vs 0.132 live (1.73x);
+   pour_franka --fast runs 366 frames at 66 ms/frame. Two hard lessons from that run:
+   (a) state imports (set_x and friends) must copy IN PLACE; replacing a warp array
+   invalidates the pointers baked into captured graphs (CUDA error 700). Fixed: wp.copy
+   into the existing arrays, pointer-based graph signature forces recapture as a backstop,
+   WARPMPM_NO_CUDA_GRAPH=1 is the field kill-switch.
+   (b) GL and heavy CUDA in ONE process fault on GH200 driver 590.48.01 (dmesg Xid 31
+   graphics MMU fault, Xid 109 ctx-switch-timeout storms). EGL alone is fine (11 ms/frame);
+   the mix is what dies. On such nodes run --skip-video and render from dumped frames in a
+   separate GL-only process. Diagnose "hangs" with dmesg -T | grep -i xid, not the
+   Python traceback.
+3. bench_step before and after on the GPU box; gate: existing suite green on CPU and GPU. DONE.
 
 ## Regime coverage: which solver for which scene
 
