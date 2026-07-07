@@ -27,7 +27,8 @@ class FrankaArm:
     Q_DOWN = np.array([0.0, 0.35, 0.0, -2.4, 0.0, 2.75, 0.79])
 
     def __init__(self, height: int = 480, width: int = 640, ft_sensor: bool = False,
-                 hide_gripper: bool = False, base_pos=None, max_geom: int = 10000):
+                 hide_gripper: bool = False, base_pos=None, max_geom: int = 10000,
+                 sphere_detail: tuple[int, int] | None = None):
         _default_mujoco_gl()
         import mujoco
         from robot_descriptions import panda_mj_description
@@ -77,6 +78,14 @@ class FrankaArm:
         # the default offscreen framebuffer is 640x480; enlarge it so any requested size renders
         self.model.vis.global_.offwidth = max(int(self.model.vis.global_.offwidth), width)
         self.model.vis.global_.offheight = max(int(self.model.vis.global_.offheight), height)
+        if sphere_detail is not None:
+            # tessellation of PROCEDURAL geoms (the particle spheres; robot meshes are
+            # unaffected). The default 28x16 is ~500 triangles per sphere, absurd for
+            # particles a few pixels wide; (8, 6) halves the GL frame time at 3e5 geoms
+            # with no visible change at particle scale. Must be set before the Renderer
+            # is built (the GL context bakes the tessellation).
+            self.model.vis.quality.numslices = int(sphere_detail[0])
+            self.model.vis.quality.numstacks = int(sphere_detail[1])
         self.renderer = mujoco.Renderer(self.model, height=height, width=width,
                                         max_geom=max_geom)
         self.cam = mujoco.MjvCamera()
@@ -190,14 +199,20 @@ class FrankaArm:
         room = sc.maxgeom - sc.ngeom
         n = len(pts_world)
         stride = max(1, int(np.ceil(n / max(room, 1))))
-        for i in range(0, n, stride):
-            if sc.ngeom >= sc.maxgeom:
-                break
-            g = sc.geoms[sc.ngeom]
-            self.mj.mjv_initGeom(g, self.mj.mjtGeom.mjGEOM_SPHERE,
-                                 np.array([radius, 0.0, 0.0]), pts_world[i].astype(np.float64),
-                                 eye, rgba[i].astype(np.float32))
-            sc.ngeom += 1
+        idx = np.arange(0, n, stride)
+        # hoist everything out of the hot loop: per-particle astype/attribute lookups
+        # dominate at 1e5+ geoms (the loop is Python->C once per particle regardless)
+        pts64 = np.ascontiguousarray(pts_world[idx], np.float64)
+        rgba32 = np.ascontiguousarray(rgba[idx], np.float32)
+        size = np.array([radius, 0.0, 0.0])
+        init = self.mj.mjv_initGeom
+        sphere = self.mj.mjtGeom.mjGEOM_SPHERE
+        geoms = sc.geoms
+        base = sc.ngeom
+        m = min(len(idx), sc.maxgeom - base)
+        for k in range(m):
+            init(geoms[base + k], sphere, size, pts64[k], eye, rgba32[k])
+        sc.ngeom = base + m
         return self.renderer.render()
 
 
@@ -231,7 +246,8 @@ class PandaPour(FrankaArm):
     CUP_TO_HAND = np.array([[0.0, 0.0, 1.0], [0.0, 1.0, 0.0], [-1.0, 0.0, 0.0]])
 
     def __init__(self, height: int = 480, width: int = 640, max_geom: int = 30000,
-                 glass_mesh=None, glass_rgba=(0.76, 0.92, 1.0, 0.30)):
+                 glass_mesh=None, glass_rgba=(0.76, 0.92, 1.0, 0.30),
+                 sphere_detail: tuple[int, int] | None = None):
         # optional render glasses: the watertight open-top mesh (write_glass_obj) is
         # added as an asset with two mocap bodies ("glass_src", "glass_rcv") so MuJoCo
         # draws the REAL glass geometry (thick base, filleted cavity) with glass-like
@@ -239,7 +255,7 @@ class PandaPour(FrankaArm):
         self._glass_mesh = None if glass_mesh is None else str(glass_mesh)
         self._glass_rgba = tuple(float(c) for c in glass_rgba)
         super().__init__(height=height, width=width, base_pos=self.BASE_POS,
-                         max_geom=max_geom)
+                         max_geom=max_geom, sphere_detail=sphere_detail)
         self.q_pour = self.Q_UPRIGHT + self.POUR_POSE_FRACTION * (
             self.Q_FULL_POUR - self.Q_UPRIGHT
         )

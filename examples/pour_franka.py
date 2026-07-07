@@ -112,9 +112,26 @@ def substeps_per_tick(liq: dict, dx: float, dt_tick: float) -> int:
     return int(np.ceil(dt_tick * max(acoustic, viscous)))
 
 
+RENDER_MAX = 120_000  # particle cap per rendered frame; the honey is opaque so interior
+                      # particles are invisible, and MuJoCo's classic renderer pays a
+                      # per-geom draw cost (~6 us/geom) that dominates past ~1e5 spheres.
+                      # The subsample is a fixed permutation (same particles every frame,
+                      # no flicker) and the radius is bumped by (n/m)^(1/3) to keep the
+                      # rendered liquid volume. --render-max 0 restores every particle.
+
+
+def render_subsample(n: int, cap: int = RENDER_MAX):
+    """(indices, radius_scale) for render-time particle thinning; identity if under cap."""
+    if not cap or n <= cap:
+        return slice(None), 1.0
+    idx = np.sort(np.random.default_rng(0).permutation(n)[:cap])
+    return idx, float((n / cap) ** (1.0 / 3.0))
+
+
 def make_arm(mesh_path: Path) -> PandaPour:
     arm = PandaPour(height=720, width=1280, max_geom=360000,  # every particle at 192^3
-                    glass_mesh=mesh_path, glass_rgba=GLASS_RGBA)
+                    glass_mesh=mesh_path, glass_rgba=GLASS_RGBA,
+                    sphere_detail=(8, 6))  # particles are a few px; 28x16 default is 2x slower
     arm.set_glass_pose("glass_rcv", RECEIVER_POS, Q_ID)  # static receiver, set once
     arm.cam.lookat[:] = CAMERA["lookat"]
     arm.cam.distance = CAMERA["distance"]
@@ -123,7 +140,8 @@ def make_arm(mesh_path: Path) -> PandaPour:
     return arm
 
 
-def render_frame(arm: PandaPour, x_world, spd, p_now, q_now, t_now: float, h: float):
+def render_frame(arm: PandaPour, x_world, spd, p_now, q_now, t_now: float, h: float,
+                 radius_scale: float = 1.0):
     """One composite frame: arm at t, source glass at (p, q), particles colored by speed."""
     arm.set_glass_pose("glass_src", p_now, q_now)
     arm.set_time(t_now)
@@ -133,7 +151,7 @@ def render_frame(arm: PandaPour, x_world, spd, p_now, q_now, t_now: float, h: fl
     )  # brighten fast liquid
     handle_c = p_now + quat_to_mat(q_now) @ arm.GRASP_LOCAL
     return arm.render_with_particles(
-        x_world, col, radius=0.85 * h,
+        x_world, col, radius=0.85 * h * radius_scale,
         table=(0.19, -0.18, 0.0, 0.85),
         boxes=[
             (handle_c, (0.060, 0.025, 0.050), HANDLE_RGBA, quat_to_mat(q_now)),
@@ -155,30 +173,66 @@ def write_mp4(frames_dir: Path, fps: int) -> Path:
     return mp4
 
 
-def render_recording(n_grid: int) -> Path:
-    """Render a --record dump to mp4. Runs in its own process with no warp compute, so
-    it is safe on nodes where GL + heavy CUDA in one process fault the driver."""
+def _render_chunk(task) -> int:
+    """Worker: render recorded frames [lo, hi) to PNGs. Top-level so it spawns cleanly;
+    each worker owns its own PandaPour (own GL context)."""
+    n_grid, lo, hi, render_max = task
+    import imageio.v2 as imageio
+
     rec_dir = OUT / f"_rec_n{n_grid}"
-    files = sorted(rec_dir.glob("f_*.npz"))
-    if not files:
+    files = sorted(rec_dir.glob("f_*.npz"))[lo:hi]
+    h = float(np.load(rec_dir / "meta.npz")["h"])
+    arm = make_arm(OUT / "glass_render.obj")  # written by the parent before spawning
+    frames_dir = OUT / "_frames"
+    sub, rscale = None, 1.0
+    t0 = time.time()
+    for j, fp in enumerate(files):
+        d = np.load(fp)
+        x, spd = d["x"], d["spd"].astype(np.float32)
+        if sub is None:
+            sub, rscale = render_subsample(len(x), render_max)
+        img = render_frame(arm, x[sub], spd[sub], d["p"], d["q"], float(d["t"]), h,
+                           radius_scale=rscale)
+        imageio.imwrite(frames_dir / f"f_{lo + j:04d}.png", img)
+        if lo == 0 and (j % 30 == 0 or j == len(files) - 1):
+            print(f"render {j+1:3d}/{len(files)} (worker 0) "
+                  f"[{(time.time()-t0)/(j+1)*1000:.0f}ms/frame]")
+    arm.close()
+    return len(files)
+
+
+def render_recording(n_grid: int, workers: int = 0, render_max: int = RENDER_MAX) -> Path:
+    """Render a --record dump to mp4 in a process with no warp compute (safe on nodes
+    where GL + heavy CUDA in one process fault the driver). Frames are independent, so
+    they are split across `workers` GL-only subprocesses (0 = min(8, cpu count))."""
+    rec_dir = OUT / f"_rec_n{n_grid}"
+    n = len(list(rec_dir.glob("f_*.npz")))
+    if not n:
         raise SystemExit(f"no recorded frames in {rec_dir}; run with --record first")
     meta = np.load(rec_dir / "meta.npz")
-    arm = make_arm(write_glass_obj(PROFILE, OUT / "glass_render.obj"))
+    write_glass_obj(PROFILE, OUT / "glass_render.obj")  # once, before workers race
     frames_dir = OUT / "_frames"
     frames_dir.mkdir(exist_ok=True)
     for stale in frames_dir.glob("f_*.png"):
         stale.unlink()
-    import imageio.v2 as imageio
 
+    import os
+    workers = min(workers or min(8, os.cpu_count() or 1), n)
     t0 = time.time()
-    for i, fp in enumerate(files):
-        d = np.load(fp)
-        img = render_frame(arm, d["x"], d["spd"].astype(np.float32), d["p"], d["q"],
-                           float(d["t"]), float(meta["h"]))
-        imageio.imwrite(frames_dir / f"f_{i:04d}.png", img)
-        if i % 60 == 0 or i == len(files) - 1:
-            print(f"render {i+1:3d}/{len(files)} [{(time.time()-t0)/(i+1)*1000:.0f}ms/frame]")
-    arm.close()
+    if workers > 1:
+        import multiprocessing as mp
+        from concurrent.futures import ProcessPoolExecutor
+
+        bounds = np.linspace(0, n, workers + 1).astype(int)
+        tasks = [(n_grid, int(a), int(b), render_max)
+                 for a, b in zip(bounds[:-1], bounds[1:]) if b > a]
+        with ProcessPoolExecutor(max_workers=len(tasks),
+                                 mp_context=mp.get_context("spawn")) as ex:
+            done = sum(ex.map(_render_chunk, tasks))
+    else:
+        done = _render_chunk((n_grid, 0, n, render_max))
+    print(f"rendered {done} frames with {workers} worker(s) "
+          f"[{(time.time()-t0)/max(done,1)*1000:.0f}ms/frame effective]")
     mp4 = write_mp4(frames_dir, fps=int(meta["fps"]))
     print("wrote", mp4)
     return mp4
@@ -231,7 +285,8 @@ def level_volume(x_world, pos, quat, h: float) -> float:
 
 def run(device: str = "auto", n_grid: int = 192, video: bool = True,
         record: bool = False, rebake: bool = False, render_stride: int = 1,
-        frames: int | None = None) -> dict:
+        frames: int | None = None, render_workers: int = 0,
+        render_max: int = RENDER_MAX) -> dict:
     OUT.mkdir(parents=True, exist_ok=True)
     arm = make_arm(write_glass_obj(PROFILE, OUT / "glass_render.obj"))
 
@@ -289,9 +344,12 @@ def run(device: str = "auto", n_grid: int = 192, video: bool = True,
     rows = []
     max_embedded = 0
     proj_total = 0
+    render_sub, render_rscale = render_subsample(n0, render_max)
+    t_sim = t_host = t_io = 0.0
     t_start = time.time()
     for frame in range(n_frames):
         t = frame * dt_tick
+        t_a = time.time()
         # start-of-tick pose + per-tick velocities: modify_bc sweeps the cup to the
         # commanded end-of-tick pose over the substeps (the set_box contract + rotation)
         p0, q0 = arm.cup_pose_at(t)
@@ -306,6 +364,7 @@ def run(device: str = "auto", n_grid: int = 192, video: bool = True,
         w_rcv = s.cup_wrench(rcv, dt_tick)
         t_now = t + dt_tick
         p_now, q_now = p1, q1
+        t_b = time.time()
 
         # ---- leak audit + rescue net (counts reported; grid BC should keep this ~0) ----
         x = s.x()
@@ -342,10 +401,12 @@ def run(device: str = "auto", n_grid: int = 192, video: bool = True,
             embedded=ns_src + ns_rcv, projected=proj_total,
         ))
 
+        t_c = time.time()
         if frame % render_stride == 0:
             if video:
-                img = render_frame(arm, x - WORLD_TO_MPM, np.linalg.norm(v, axis=1),
-                                   p_now, q_now, t_now, h)
+                img = render_frame(arm, x[render_sub] - WORLD_TO_MPM,
+                                   np.linalg.norm(v[render_sub], axis=1),
+                                   p_now, q_now, t_now, h, radius_scale=render_rscale)
                 imageio.imwrite(frames_dir / f"f_{frame//render_stride:04d}.png", img)
             elif record:
                 # positions f32 (f16 would quantize to ~0.3 mm over the 0.7 m domain),
@@ -354,6 +415,9 @@ def run(device: str = "auto", n_grid: int = 192, video: bool = True,
                          x=(x - WORLD_TO_MPM).astype(np.float32),
                          spd=np.linalg.norm(v, axis=1).astype(np.float16),
                          p=p_now, q=q_now, t=t_now)
+        t_sim += t_b - t_a
+        t_host += t_c - t_b
+        t_io += time.time() - t_c
 
         if frame % 30 == 0 or frame == n_frames - 1:
             el = time.time() - t_start
@@ -412,14 +476,18 @@ def run(device: str = "auto", n_grid: int = 192, video: bool = True,
     print("wrote", csv_path, "and", OUT / "pour_metrics.png", "and", final_npz.name)
     print(f"final: receiver {r['frac_rcv'][-1]*100:.1f}% spill/air {r['frac_spill'][-1]*100:.1f}% "
           f"| max embedded ever {max_embedded} | total projected {proj_total}")
+    print(f"timing: sim+wrench {t_sim:.0f}s | audit+metrics (host numpy) {t_host:.0f}s | "
+          f"render/record io {t_io:.0f}s | per frame "
+          f"{t_sim/n_frames*1000:.0f}/{t_host/n_frames*1000:.0f}/{t_io/n_frames*1000:.0f} ms")
     arm.close()
 
     if record:
         n_rec = len(list(rec_dir.glob("f_*.npz")))
         print(f"recorded {n_rec} frames -> {rec_dir}")
         cmd = [sys.executable, str(Path(__file__).resolve()),
-               "--render-only", "--n-grid", str(n_grid)]
-        print("rendering in a fresh GL-only process (GL + CUDA compute must not share "
+               "--render-only", "--n-grid", str(n_grid),
+               "--render-workers", str(render_workers), "--render-max", str(render_max)]
+        print("rendering in fresh GL-only processes (GL + CUDA compute must not share "
               "a process on GH200 nodes):", " ".join(cmd))
         if subprocess.run(cmd).returncode == 0:
             mp4 = OUT / "pour_franka.mp4"
@@ -443,10 +511,17 @@ if __name__ == "__main__":
     ap.add_argument("--rebake", action="store_true", help="refresh the settled cache")
     ap.add_argument("--frames", type=int, default=None,
                     help="cap the number of frames (smoke/debug)")
+    ap.add_argument("--render-workers", type=int, default=0,
+                    help="parallel GL render processes for --record/--render-only "
+                         "(0 = min(8, cpus); frames are independent)")
+    ap.add_argument("--render-max", type=int, default=RENDER_MAX,
+                    help=f"max particles drawn per frame (0 = all; default {RENDER_MAX})")
     args = ap.parse_args()
     if args.render_only:
-        render_recording(96 if args.fast else args.n_grid)
+        render_recording(96 if args.fast else args.n_grid,
+                         workers=args.render_workers, render_max=args.render_max)
     else:
         run(device=args.device, n_grid=96 if args.fast else args.n_grid,
             video=not args.skip_video and not args.record, record=args.record,
-            rebake=args.rebake, frames=args.frames)
+            rebake=args.rebake, frames=args.frames,
+            render_workers=args.render_workers, render_max=args.render_max)
