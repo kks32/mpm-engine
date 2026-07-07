@@ -126,10 +126,21 @@ is a no-op either way, which is why Steps 1 and 2 are testable on the Mac first.
 
 ### Work items
 
-1. Timers opt-in (profile=True), default off.
-2. CUDA graph capture of the substep sequence (wp.ScopedCapture): one graph replay per
-   substep instead of about ten kernel launches; this matters most at our scene sizes,
-   where launch overhead rivals compute.
+1. DONE (with Step 1): timers opt-in via `sim.profile = True`, default off. All eight
+   per-phase syncs removed from the default path; profile=True restores exactly the old
+   behavior and fills time_profile. Verified no-op on CPU (full suite bitwise).
+2. CUDA graph capture of the substep sequence (wp.ScopedCapture). Two design constraints
+   discovered while building Step 1, both of which break a naive whole-substep capture:
+   - modify_bc pose integration runs on the HOST between launches, and collider structs
+     are marshalled by value at launch; a captured graph bakes those values, so a
+     replayed graph would never update the tool pose. Either move pose integration into
+     a device kernel (pose stored in a wp.array the graph reads), or keep the BC segment
+     outside the capture.
+   - Step 1's restricted launch dims are baked into a graph. Options: capture only the
+     fixed-shape inner phases (zero, p2g, normalize, g2p) and leave BC launches live;
+     or re-capture when a box changes by more than the halo; or disable restriction
+     inside the captured region on GPU, where the dense sweep is cheap anyway.
+   The pragmatic v1 on the GPU box: capture the inner phases, keep BC + modify live.
 3. bench_step before and after on the GPU box; gate: existing suite green on CPU and GPU.
 
 ## Regime coverage: which solver for which scene

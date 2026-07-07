@@ -268,6 +268,11 @@ class MPM_Simulator_WARP:
         self.grid_launch_box = None
         self._prev_grid_box = None
         self.restrict_grid = True
+        # per-phase ScopedTimers force a device sync each substep, which is pure
+        # instrumentation (stream ordering guarantees kernel correctness; host reads
+        # synchronize implicitly). profile=True restores the synced timers and fills
+        # time_profile; default off so the GPU pipeline never stalls for a stopwatch.
+        self.profile = False
 
         self.tailored_struct_for_bc = MPMtailoredStruct()
         self.pre_p2g_operations = []
@@ -800,7 +805,7 @@ class MPM_Simulator_WARP:
         # compute stress = stress(returnMap(F_trial))
         with wp.ScopedTimer(
             "compute_stress_from_F_trial",
-            synchronize=True,
+            synchronize=self.profile, active=self.profile,
             print=False,
             dict=self.time_profile,
         ):
@@ -814,7 +819,7 @@ class MPM_Simulator_WARP:
         # p2g
         with wp.ScopedTimer(
             "p2g",
-            synchronize=True,
+            synchronize=self.profile, active=self.profile,
             print=False,
             dict=self.time_profile,
         ):
@@ -827,7 +832,7 @@ class MPM_Simulator_WARP:
 
         # grid update
         with wp.ScopedTimer(
-            "grid_update", synchronize=True, print=False, dict=self.time_profile
+            "grid_update", synchronize=self.profile, active=self.profile, print=False, dict=self.time_profile
         ):
             wp.launch(
                 kernel=grid_normalization_and_gravity,
@@ -846,7 +851,7 @@ class MPM_Simulator_WARP:
 
         # apply BC on grid
         with wp.ScopedTimer(
-            "apply_BC_on_grid", synchronize=True, print=False, dict=self.time_profile
+            "apply_BC_on_grid", synchronize=self.profile, active=self.profile, print=False, dict=self.time_profile
         ):
             for k in range(len(self.grid_postprocess)):
                 # restrict the launch to the collider's current grid box when it has one;
@@ -882,7 +887,7 @@ class MPM_Simulator_WARP:
 
         # g2p
         with wp.ScopedTimer(
-            "g2p", synchronize=True, print=False, dict=self.time_profile
+            "g2p", synchronize=self.profile, active=self.profile, print=False, dict=self.time_profile
         ):
             wp.launch(
                 kernel=g2p,
@@ -893,7 +898,7 @@ class MPM_Simulator_WARP:
 
         # rigid body step (skipped when no rigid bodies are present)
         if self.n_rigid_bodies > 0:
-            with wp.ScopedTimer("rigid_body", synchronize=True, print=False, dict=self.time_profile):
+            with wp.ScopedTimer("rigid_body", synchronize=self.profile, active=self.profile, print=False, dict=self.time_profile):
                 # zero accumulation buffers
                 wp.launch(kernel=set_vec3_to_zero, dim=self.n_rigid_bodies,
                           inputs=[self._rigid_linear_mom], device=device)
@@ -1102,7 +1107,7 @@ class MPM_Simulator_WARP:
     def export_particle_R_to_torch(self, device="cuda:0"):
         with wp.ScopedTimer(
             "compute_R_from_F",
-            synchronize=True,
+            synchronize=self.profile, active=self.profile,
             print=False,
             dict=self.time_profile,
         ):
@@ -1126,7 +1131,7 @@ class MPM_Simulator_WARP:
         if not self.mpm_model.update_cov_with_F:
             with wp.ScopedTimer(
                 "compute_cov_from_F",
-                synchronize=True,
+                synchronize=self.profile, active=self.profile,
                 print=False,
                 dict=self.time_profile,
             ):
