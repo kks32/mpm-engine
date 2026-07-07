@@ -1,17 +1,12 @@
-"""Pour a fluid from one cup into another, both as mesh -> signed-distance-field colliders.
-
-This is the mesh-SDF analogue of the Genesis pouring scene, on the warp engine. A watertight
-cup mesh is voxelized into a signed-distance field (warpmpm.geometry); the field is attached to
-the engine as a moving/rotating collider (Solver.add_sdf_collider). The pouring cup is filled
-with a weakly-compressible fluid, then tilted about its base by a scripted angular velocity
-(Solver.set_sdf_pose) so the fluid flows over the rim and falls into a second, static cup. The
-exact reaction wrench on each cup is available from the grid impulse (Solver.sdf_wrench).
-
-The cup pose is driven through set_sdf_pose, the same contract the MuJoCo coupling layer uses,
-so the scripted tilt here can be replaced by a robot end-effector trajectory unchanged.
+"""Minimal mesh->SDF pour: two watertight cup MESHES voxelized to signed-distance
+colliders, one tilted by a scripted angular velocity. This is the API demo for the
+general mesh->SDF collider path (warpmpm.geometry.build_sdf_cached + add_sdf_collider),
+which handles arbitrary watertight meshes. For the full Franka pouring EXPERIMENT
+(Genesis-twin honey pour, metrics, leak audit, analytic revolved glasses) see
+examples/pour_franka.py.
 
 Run:  python -m examples.pour_glass            # simulate + render an mp4
-      python -m examples.pour_glass --no-render # simulate only (faster, prints transfer stats)
+      python -m examples.pour_glass --no-render # simulate only (prints transfer stats)
 """
 from __future__ import annotations
 
