@@ -142,6 +142,32 @@ class PointCloudCollider:
     end_time: float
 
 
+# kinematic open-top glass (solid of revolution) driven by the robot end-effector:
+# 6-DoF pose + rigid velocity field, analytic profile scalars, and the Newton-exact
+# reaction impulse/torque accumulators (see add_revolved_sdf_collider)
+@wp.struct
+class RevolvedCollider:
+    point: wp.vec3          # glass centre (mid-height), world frame
+    rot: wp.mat33           # local -> world rotation
+    velocity: wp.vec3       # linear velocity of the centre
+    omega: wp.vec3          # angular velocity, world frame
+
+    start_time: float
+    end_time: float
+    friction: float         # Coulomb friction of the near-surface separable contact
+
+    outer_radius: float
+    inner_radius: float
+    half_height: float
+    inner_floor_z: float    # local z of the cavity floor
+    fillet_radius: float    # cavity floor-edge fillet
+    sticky_depth: float     # deeper than this inside the solid: full velocity grab
+    contact_band: float     # BC also acts this far OUTSIDE the surface (approach-only)
+
+    force: wp.array(dtype=wp.vec3)   # sum_substeps sum_nodes m*(v_free - v_imposed)
+    torque: wp.array(dtype=wp.vec3)  # sum of (x_node - point) x impulse
+
+
 @wp.struct
 class SDFCollider:
     # a watertight mesh represented as a stored signed-distance field in its body frame:

@@ -713,7 +713,11 @@ def p2g_apic_with_stress(state: MPMStateStruct, model: MPMModelStruct, dt: float
             wp.vec3(0.0, 0.0, 0.0) - wp.cw_mul(wb, wb) + wp.vec3(0.75),
             wp.cw_mul(wc, wc) * 0.5,
         )
-        dw = wp.matrix_from_cols(fx - wp.vec3(1.5), -2.0 * (fx - wp.vec3(1.0)), fx - wp.vec3(0.5))
+        dw = wp.matrix_from_cols(
+            fx - wp.vec3(1.5),
+            -2.0 * (fx - wp.vec3(1.0)),
+            fx - wp.vec3(0.5),
+        )
 
         for i in range(0, 3):
             for j in range(0, 3):
@@ -787,7 +791,11 @@ def g2p(state: MPMStateStruct, model: MPMModelStruct, dt: float):
             wp.vec3(0.0, 0.0, 0.0) - wp.cw_mul(wb, wb) + wp.vec3(0.75),
             wp.cw_mul(wc, wc) * 0.5,
         )
-        dw = wp.matrix_from_cols(fx - wp.vec3(1.5), -2.0 * (fx - wp.vec3(1.0)), fx - wp.vec3(0.5))
+        dw = wp.matrix_from_cols(
+            fx - wp.vec3(1.5),
+            -2.0 * (fx - wp.vec3(1.0)),
+            fx - wp.vec3(0.5),
+        )
         new_v = wp.vec3(0.0, 0.0, 0.0)
         new_C = wp.mat33(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
         new_F = wp.mat33(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)

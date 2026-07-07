@@ -5,8 +5,10 @@ stress and return-mapping kernels (`mpm_utils`), and the model/state structs (`w
 It began as the UCLA warp-mpm of Zeshun Zong et al. (the base solver, the quadratic
 B-spline transfer, and materials 0-8) and was extended by this group (UT Austin): moving
 robot colliders with a velocity boundary, a Newton-exact grid-impulse contact force,
-multi-material scenes, a point-cloud loader, and the mu(I) / viscoplastic constitutive
-models (materials 9-13). See AUTHORS.md for attribution and citation.
+a 6-DoF kinematic revolved-SDF glass collider (separable Coulomb contact + wrench/torque
+readout, for pouring), multi-material scenes, a point-cloud loader, and the mu(I) /
+viscoplastic constitutive models (materials 9-13). See AUTHORS.md for attribution and
+citation.
 
 This is the single import surface for the kernels: the typed `core.Solver` wrapper and the
 `sim/` scenes import `MPM_Simulator_WARP` (and the low-level structs) from here.

@@ -5,6 +5,7 @@ stress-integral reaction-wrench readout, and a MuJoCo coupling adapter. Sparse a
 grid + implicit Newton-CG are the planned fast path (see README roadmap)."""
 from __future__ import annotations
 
+from warpmpm.colliders.glass import GlassProfile, cup_fill
 from warpmpm.core.solver import GridConfig, Solver
 from warpmpm.coupling.admittance import ForceAdmittance, Impedance1D
 from warpmpm.coupling.backend import WarpMPMBackend
@@ -22,6 +23,7 @@ from warpmpm.scenes import block, dough
 __version__ = "0.0.1"
 __all__ = [
     "ForceAdmittance",
+    "GlassProfile",
     "GridConfig",
     "Impedance1D",
     "Material",
@@ -30,6 +32,7 @@ __all__ = [
     "__version__",
     "block",
     "box_contact_wrench",
+    "cup_fill",
     "dough",
     "elastic",
     "granular",

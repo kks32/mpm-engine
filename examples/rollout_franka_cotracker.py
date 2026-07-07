@@ -217,6 +217,7 @@ def _side_by_side(fdirs, tracks, err_t):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--device", default="cuda:0", help="Warp MPM device, e.g. cuda:0 or cuda:1")
+    parser.add_argument("--device", default="auto",
+                        help="Warp device: auto (cuda if available), cuda:N, or cpu")
     args = parser.parse_args()
     run(device=args.device)

@@ -123,6 +123,70 @@ class Solver:
             p.velocity = wp.vec3(float(velocity[0]), float(velocity[1]), float(velocity[2]))
         return self
 
+    # --- kinematic glass (revolved-SDF cup collider) ----------------------------------
+    def add_cup(self, profile, center, quat=(1.0, 0.0, 0.0, 0.0), velocity=(0.0, 0.0, 0.0),
+                omega=(0.0, 0.0, 0.0), friction: float = 0.05, sticky_cells: float = 1.5,
+                contact_cells: float = 0.5, start_time: float = 0.0,
+                end_time: float = 1.0e9) -> int:
+        """A kinematic open-top glass collider (analytic revolved SDF; profile is a
+        colliders.glass.GlassProfile) at pose (center, wxyz quat), imposing its rigid
+        velocity field on the grid: separable Coulomb-friction contact from contact_cells*dx
+        OUTSIDE the surface (approach is stopped before material can creep into the wall)
+        down to sticky_cells*dx inside it, full grab deeper (anti-tunneling backstop).
+        Returns a handle; drive it each control tick with set_cup. Accumulates the
+        Newton-exact reaction impulse AND torque; read with cup_wrench after step()."""
+        from warpmpm.colliders.glass import quat_to_mat
+
+        # the sticky core must survive inside the wall: cap the friction shell at just
+        # under half the wall thickness so coarse grids keep an anti-tunneling backstop
+        sticky_depth = min(sticky_cells * self.grid.dx, 0.45 * profile.wall_thickness)
+        return self._sim.add_revolved_sdf_collider(
+            point=tuple(center), rot=quat_to_mat(quat), velocity=tuple(velocity),
+            omega=tuple(omega), outer_radius=profile.outer_radius,
+            inner_radius=profile.inner_radius, half_height=profile.half_height,
+            inner_floor_z=profile.inner_floor_z, fillet_radius=profile.fillet_radius,
+            friction=friction, sticky_depth=sticky_depth,
+            contact_band=contact_cells * self.grid.dx,
+            start_time=start_time, end_time=end_time,
+        )
+
+    def set_cup(self, handle: int, center=None, quat=None, velocity=None, omega=None) -> Solver:
+        """Update a cup's pose/velocities. Same contract as set_box, extended to rotation:
+        pass the START-of-tick pose plus per-tick velocities (v, omega); modify_bc sweeps
+        the cup to the commanded end-of-tick pose over the substeps."""
+        from warpmpm.colliders.glass import quat_to_mat
+
+        rot = None if quat is None else quat_to_mat(quat)
+        self._sim.set_revolved_collider_pose(handle, point=center, rot=rot,
+                                             velocity=velocity, omega=omega)
+        return self
+
+    def reset_cup_wrench(self, handle: int) -> Solver:
+        """Zero a cup collider's reaction impulse + torque accumulators (call before the
+        substeps you want to integrate the wrench over)."""
+        p = self._sim.collider_params[handle]
+        p.force.zero_()
+        p.torque.zero_()
+        return self
+
+    def cup_wrench(self, handle: int, dt: float) -> dict:
+        """Newton-exact reaction wrench the material exerts on a cup collider, from the
+        grid impulse accumulated since the last reset over elapsed time dt: force[3] and
+        torque[3] (about the cup centre). A static cup holding m kg of settled liquid
+        reads force ~ (0, 0, -m*g) -- the liquid's weight pressing on the glass."""
+        p = self._sim.collider_params[handle]
+        return {
+            "force": np.asarray(p.force.numpy()[0], dtype=float) / dt,
+            "torque": np.asarray(p.torque.numpy()[0], dtype=float) / dt,
+        }
+
+    def add_domain_walls(self, start_time: float = 0.0, end_time: float = 1.0e9) -> Solver:
+        """Zero outward grid velocity in a 3-cell band at the domain faces, so splashes
+        can never advect particles out of [0, grid_lim]^3 (out-of-domain particles would
+        index the grid out of bounds in p2g)."""
+        self._sim.add_bounding_box(start_time=start_time, end_time=end_time)
+        return self
+
     def add_sdf_collider(self, sdf, center, quat=(0.0, 0.0, 0.0, 1.0),
                          velocity=(0.0, 0.0, 0.0), omega=(0.0, 0.0, 0.0), band=None,
                          surface: str = "separable", friction: float = 0.4,
@@ -204,6 +268,22 @@ class Solver:
         pad = 3.0 * dx + 1.5 * float(np.abs(v).max()) * dt * substeps
         self._sim.grid_launch_box = self._sim._grid_box(x.min(0) - pad, x.max(0) + pad,
                                                         halo=0)
+    # --- imports (numpy, off the hot path; e.g. the leak-projection rescue net) -------
+    def set_x(self, pos: np.ndarray) -> Solver:
+        import torch
+
+        self._sim.import_particle_x_from_torch(
+            torch.from_numpy(np.ascontiguousarray(pos, dtype=np.float32)), device=self.device
+        )
+        return self
+
+    def set_v(self, vel: np.ndarray) -> Solver:
+        import torch
+
+        self._sim.import_particle_v_from_torch(
+            torch.from_numpy(np.ascontiguousarray(vel, dtype=np.float32)), device=self.device
+        )
+        return self
 
     # --- exports (numpy, off the hot path) -------------------------------------------
     def x(self) -> np.ndarray:

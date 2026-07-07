@@ -30,6 +30,7 @@ What exists today:
   third law), the cross-validation baseline.
 - `adapters/mujoco_adapter.py` — `FrankaArm`: scripted Panda descent + composite render.
 - `scenes.py` — `block`, `dough` scene builders.
+- `examples/pour_franka.py` — Franka glass-to-glass pouring example.
 - `tests/`, `benchmarks/` — conservation + sanity; ms/step.
 
 Planned (empty stubs today): `colliders/` (capsule/sphere SDFs), a unified
