@@ -261,6 +261,13 @@ class MPM_Simulator_WARP:
         # (used by the equivalence test).
         self.collider_aabbs = []
         self.restrict_bc = True
+        # live particle grid box for the zero/normalize/damping sweeps, set per control
+        # tick by the wrapper (core.Solver.step); None = full grid. Zeroing runs over the
+        # union with the previous box so nodes leaving the box are cleared exactly once
+        # (stale mass outside the box would corrupt collider force readouts).
+        self.grid_launch_box = None
+        self._prev_grid_box = None
+        self.restrict_grid = True
 
         self.tailored_struct_for_bc = MPMtailoredStruct()
         self.pre_p2g_operations = []
@@ -746,10 +753,30 @@ class MPM_Simulator_WARP:
             self.mpm_model.grid_dim_y,
             self.mpm_model.grid_dim_z,
         )
+        # restricted grid sweeps: zero/normalize/damping run over the live particle box
+        # when the wrapper has set one; zeroing uses the union with the previous box so
+        # nodes leaving the box are cleared exactly once
+        gbox = self.grid_launch_box if (self.restrict_grid and self.grid_launch_box) else None
+        if gbox is None:
+            g_lo, g_dims = wp.vec3i(0, 0, 0), grid_size
+            z_lo, z_dims = g_lo, g_dims
+            self._prev_grid_box = None
+        else:
+            g_lo, g_dims = wp.vec3i(*gbox[0]), gbox[1]
+            prev = self._prev_grid_box
+            if prev is None:
+                z_lo, z_dims = g_lo, g_dims
+            else:
+                zl = tuple(min(prev[0][i], gbox[0][i]) for i in range(3))
+                zh = tuple(max(prev[0][i] + prev[1][i], gbox[0][i] + gbox[1][i])
+                           for i in range(3))
+                z_lo = wp.vec3i(*zl)
+                z_dims = tuple(zh[i] - zl[i] for i in range(3))
+            self._prev_grid_box = gbox
         wp.launch(
             kernel=zero_grid,
-            dim=(grid_size),
-            inputs=[self.mpm_state, self.mpm_model],
+            dim=z_dims,
+            inputs=[self.mpm_state, self.mpm_model, z_lo],
             device=device,
         )
 
@@ -804,16 +831,16 @@ class MPM_Simulator_WARP:
         ):
             wp.launch(
                 kernel=grid_normalization_and_gravity,
-                dim=(grid_size),
-                inputs=[self.mpm_state, self.mpm_model, dt],
+                dim=g_dims,
+                inputs=[self.mpm_state, self.mpm_model, dt, g_lo],
                 device=device,
             )
 
         if self.mpm_model.grid_v_damping_scale < 1.0:
             wp.launch(
                 kernel=add_damping_via_grid,
-                dim=(grid_size),
-                inputs=[self.mpm_state, self.mpm_model.grid_v_damping_scale],
+                dim=g_dims,
+                inputs=[self.mpm_state, self.mpm_model.grid_v_damping_scale, g_lo],
                 device=device,
             )
 

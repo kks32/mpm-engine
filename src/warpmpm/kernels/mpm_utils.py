@@ -644,8 +644,11 @@ def compute_mu_lam_from_E_nu(state: MPMStateStruct, model: MPMModelStruct):
     model.lam[p] = model.E[mat] * model.nu[mat] / ((1.0 + model.nu[mat]) * (1.0 - 2.0 * model.nu[mat]))
 
 @wp.kernel
-def zero_grid(state: MPMStateStruct, model: MPMModelStruct):
+def zero_grid(state: MPMStateStruct, model: MPMModelStruct, lo: wp.vec3i):
     grid_x, grid_y, grid_z = wp.tid()
+    grid_x = grid_x + lo[0]
+    grid_y = grid_y + lo[1]
+    grid_z = grid_z + lo[2]
     state.grid_m[grid_x, grid_y, grid_z] = 0.0
     state.grid_v_in[grid_x, grid_y, grid_z] = wp.vec3(0.0, 0.0, 0.0)
     state.grid_v_out[grid_x, grid_y, grid_z] = wp.vec3(0.0, 0.0, 0.0)
@@ -748,9 +751,12 @@ def p2g_apic_with_stress(state: MPMStateStruct, model: MPMModelStruct, dt: float
 # add gravity
 @wp.kernel
 def grid_normalization_and_gravity(
-    state: MPMStateStruct, model: MPMModelStruct, dt: float
+    state: MPMStateStruct, model: MPMModelStruct, dt: float, lo: wp.vec3i
 ):
     grid_x, grid_y, grid_z = wp.tid()
+    grid_x = grid_x + lo[0]
+    grid_y = grid_y + lo[1]
+    grid_z = grid_z + lo[2]
     if state.grid_m[grid_x, grid_y, grid_z] > 1e-15:
         v_out = state.grid_v_in[grid_x, grid_y, grid_z] * (
             1.0 / state.grid_m[grid_x, grid_y, grid_z]
@@ -969,8 +975,11 @@ def compute_R_from_F(state: MPMStateStruct, model: MPMModelStruct):
     state.particle_R[p] = wp.transpose(R)
 
 @wp.kernel
-def add_damping_via_grid(state: MPMStateStruct, scale: float):
+def add_damping_via_grid(state: MPMStateStruct, scale: float, lo: wp.vec3i):
     grid_x, grid_y, grid_z = wp.tid()
+    grid_x = grid_x + lo[0]
+    grid_y = grid_y + lo[1]
+    grid_z = grid_z + lo[2]
     state.grid_v_out[grid_x, grid_y, grid_z] = (
         state.grid_v_out[grid_x, grid_y, grid_z] * scale
     )

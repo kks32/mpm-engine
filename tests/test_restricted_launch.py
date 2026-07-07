@@ -27,6 +27,7 @@ def _scene(restrict: bool):
     sdf_h = s.add_sdf_collider(sdf, center=center, surface="separable", friction=0.3)
     box_h = s.add_box((0.30, 0.20, 0.10), (0.02, 0.02, 0.02), velocity=(-0.05, 0.0, -0.02))
     s._sim.restrict_bc = restrict
+    s._sim.restrict_grid = restrict   # zero/normalize sweeps restricted too
     return s, sdf_h, box_h
 
 
@@ -62,3 +63,17 @@ def test_collider_outside_domain_skips_launch():
     assert box is None, f"far-away collider should yield an empty launch box, got {box}"
     s.step(2.0e-4, substeps=2)   # must not crash and must not constrain anything
     assert np.isfinite(s.x()).all()
+
+
+def test_particle_near_grid_edge_raises():
+    # a particle within the P2G stencil reach of the grid edge means out-of-bounds atomic
+    # writes (silent memory corruption); Solver.step must refuse instead
+    import pytest
+
+    grid = GridConfig(n_grid=32, grid_lim=0.4)
+    pts = np.array([[0.2, 0.2, grid.grid_lim - 2.0 * grid.dx]], dtype=np.float32)
+    vol = np.full(1, 1e-6, dtype=np.float32)
+    s = Solver(grid=grid, device="cpu").load_particles(pts, vol)
+    s.set_material(newtonian(eta=5.0, density=1000.0, bulk_modulus=5.0e5))
+    with pytest.raises(RuntimeError, match="out of bounds"):
+        s.step(2.0e-4, substeps=1)

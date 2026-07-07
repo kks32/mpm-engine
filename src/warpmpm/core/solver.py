@@ -160,10 +160,30 @@ class Solver:
         return np.asarray(impulse, dtype=float) / dt
 
     def step(self, dt: float, substeps: int = 1) -> Solver:
+        self._update_grid_box(dt, substeps)
         for _ in range(substeps):
             self._sim.p2g2p(self._step, dt, device=self.device)
             self._step += 1
         return self
+
+    def _update_grid_box(self, dt: float, substeps: int) -> None:
+        """Once per control tick: (a) guard against particles reaching the grid edge,
+        where the quadratic-stencil P2G scatter would write out of bounds (silent memory
+        corruption); (b) set the live particle box, padded for this tick's motion, that
+        the zero/normalize/damping sweeps launch over instead of the full dense grid."""
+        x = self.x()
+        v = self.v()
+        dx = self.grid.dx
+        lim = self.grid.grid_lim
+        if x.min() < 1.5 * dx or x.max() > lim - 2.5 * dx:
+            raise RuntimeError(
+                f"particles within 2 cells of the grid edge (x in "
+                f"[{x.min():.4f}, {x.max():.4f}] m, domain [0, {lim}] m, dx={dx:.4f}): "
+                f"the P2G stencil would write out of bounds. Enlarge grid_lim or add a "
+                f"bounding box / wall collider.")
+        pad = 3.0 * dx + 1.5 * float(np.abs(v).max()) * dt * substeps
+        self._sim.grid_launch_box = self._sim._grid_box(x.min(0) - pad, x.max(0) + pad,
+                                                        halo=0)
 
     # --- exports (numpy, off the hot path) -------------------------------------------
     def x(self) -> np.ndarray:
