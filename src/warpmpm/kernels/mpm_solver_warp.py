@@ -313,7 +313,7 @@ class MPM_Simulator_WARP:
         # launches and host-side pose integration stay live between them. CUDA only;
         # the first substep runs live so modules JIT-load before capture; any capture
         # error falls back to live launches for the rest of the run.
-        self.use_cuda_graph = True
+        self.use_cuda_graph = os.environ.get("WARPMPM_NO_CUDA_GRAPH", "") != "1"
         self._graph_A = None
         # active-block sparse compute (enable via rebuild_active_blocks, driven per tick
         # by core.Solver when Solver.sparse=True). Takes precedence over the CUDA-graph
@@ -899,7 +899,10 @@ class MPM_Simulator_WARP:
             and not self.particle_velocity_modifiers
         )
         if use_graph:
-            sig = (float(dt), bool(self.mpm_model.grid_v_damping_scale < 1.0))
+            st = self.mpm_state
+            sig = (float(dt), bool(self.mpm_model.grid_v_damping_scale < 1.0),
+                   st.particle_x.ptr, st.particle_v.ptr, st.particle_F.ptr,
+                   st.particle_stress.ptr, st.grid_m.ptr)
             if self._graph_sig != sig:
                 try:
                     self._capture_substep_graphs(dt, device, grid_size)
@@ -1127,8 +1130,9 @@ class MPM_Simulator_WARP:
 
     # set particle densities to all_particle_densities, 
     def reset_densities_and_update_masses(self, all_particle_densities, device = "cuda:0"):
-        all_particle_densities = all_particle_densities.clone().detach()
-        self.mpm_state.particle_density = torch2warp_float(all_particle_densities, dvc=device)
+        src = torch2warp_float(all_particle_densities.detach(), dvc=device)
+        wp.copy(self.mpm_state.particle_density, src)
+        wp.synchronize_device(device)   # the source aliases a caller tensor
         wp.launch(
                 kernel=get_float_array_product,
                 dim=self.n_particles,
@@ -1142,45 +1146,63 @@ class MPM_Simulator_WARP:
 
     # clone = True makes a copy, not necessarily needed
     def import_particle_x_from_torch(self, tensor_x, clone=True, device="cuda:0"):
+        # copies IN PLACE into the existing warp array: replacing the array would leave
+        # captured CUDA graphs (and any cached views) holding a stale pointer, and the
+        # old alias-a-temporary pattern dangled once the cloned tensor was collected
         if tensor_x is not None:
-            if clone:
-                tensor_x = tensor_x.clone().detach()
-            self.mpm_state.particle_x = torch2warp_vec3(tensor_x, dvc=device)
+            src = torch2warp_vec3(tensor_x.detach(), dvc=device)
+            wp.copy(self.mpm_state.particle_x, src)
+            wp.synchronize_device(device)   # the source aliases a caller tensor
 
     # clone = True makes a copy, not necessarily needed
     def import_particle_v_from_torch(self, tensor_v, clone=True, device="cuda:0"):
+        # copies IN PLACE into the existing warp array: replacing the array would leave
+        # captured CUDA graphs (and any cached views) holding a stale pointer, and the
+        # old alias-a-temporary pattern dangled once the cloned tensor was collected
         if tensor_v is not None:
-            if clone:
-                tensor_v = tensor_v.clone().detach()
-            self.mpm_state.particle_v = torch2warp_vec3(tensor_v, dvc=device)
+            src = torch2warp_vec3(tensor_v.detach(), dvc=device)
+            wp.copy(self.mpm_state.particle_v, src)
+            wp.synchronize_device(device)   # the source aliases a caller tensor
 
     # clone = True makes a copy, not necessarily needed
     def import_particle_F_from_torch(self, tensor_F, clone=True, device="cuda:0"):
+        # copies IN PLACE into the existing warp array: replacing the array would leave
+        # captured CUDA graphs (and any cached views) holding a stale pointer, and the
+        # old alias-a-temporary pattern dangled once the cloned tensor was collected
         if tensor_F is not None:
-            if clone:
-                tensor_F = tensor_F.clone().detach()
             tensor_F = torch.reshape(tensor_F, (-1, 3, 3))  # arranged by rowmajor
-            self.mpm_state.particle_F = torch2warp_mat33(tensor_F, dvc=device)
+            src = torch2warp_mat33(tensor_F.detach(), dvc=device)
+            wp.copy(self.mpm_state.particle_F, src)
+            wp.synchronize_device(device)   # the source aliases a caller tensor
 
     # clone = True makes a copy, not necessarily needed
     def import_particle_C_from_torch(self, tensor_C, clone=True, device="cuda:0"):
+        # copies IN PLACE into the existing warp array: replacing the array would leave
+        # captured CUDA graphs (and any cached views) holding a stale pointer, and the
+        # old alias-a-temporary pattern dangled once the cloned tensor was collected
         if tensor_C is not None:
-            if clone:
-                tensor_C = tensor_C.clone().detach()
             tensor_C = torch.reshape(tensor_C, (-1, 3, 3))  # arranged by rowmajor
-            self.mpm_state.particle_C = torch2warp_mat33(tensor_C, dvc=device)
+            src = torch2warp_mat33(tensor_C.detach(), dvc=device)
+            wp.copy(self.mpm_state.particle_C, src)
+            wp.synchronize_device(device)   # the source aliases a caller tensor
             
     def import_particle_selection_from_torch(self, tensor_selection, clone=True, device="cuda:0"):
+        # copies IN PLACE into the existing warp array: replacing the array would leave
+        # captured CUDA graphs (and any cached views) holding a stale pointer, and the
+        # old alias-a-temporary pattern dangled once the cloned tensor was collected
         if tensor_selection is not None:
-            if clone:
-                tensor_selection = tensor_selection.clone().detach()
-            self.mpm_state.particle_selection = torch2warp_int(tensor_selection, dvc=device)
+            src = torch2warp_int(tensor_selection.detach(), dvc=device)
+            wp.copy(self.mpm_state.particle_selection, src)
+            wp.synchronize_device(device)   # the source aliases a caller tensor
 
     def import_particle_material_from_torch(self, tensor_material, clone=True, device="cuda:0"):
+        # copies IN PLACE into the existing warp array: replacing the array would leave
+        # captured CUDA graphs (and any cached views) holding a stale pointer, and the
+        # old alias-a-temporary pattern dangled once the cloned tensor was collected
         if tensor_material is not None:
-            if clone:
-                tensor_material = tensor_material.clone().detach()
-            self.mpm_state.particle_material = torch2warp_int(tensor_material, dvc=device)
+            src = torch2warp_int(tensor_material.detach(), dvc=device)
+            wp.copy(self.mpm_state.particle_material, src)
+            wp.synchronize_device(device)   # the source aliases a caller tensor
 
     def export_particle_material_to_torch(self):
         return wp.to_torch(self.mpm_state.particle_material)
