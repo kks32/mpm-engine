@@ -1181,3 +1181,98 @@ def rigid_particle_update(
 
         # rigid — no deformation
         state.particle_F[p] = wp.mat33(1.0, 0.0, 0.0,  0.0, 1.0, 0.0,  0.0, 0.0, 1.0)
+
+
+# ---- active-block sparse compute (speedup_plan: two-level block sparsity) ----------
+# 4^3 node blocks. Per control tick: mark the block of each particle's stencil base,
+# dilate by one block in every direction (covers the quadratic B-spline stencil
+# crossing block faces and intra-tick particle motion), and compact into an active
+# list. Grid STORAGE stays dense (fine through 256^3); grid COMPUTE (zero, normalize,
+# damping) runs over active blocks only. Zeroing runs over the union with the previous
+# tick's active set so nodes leaving the set are cleared exactly once (the same
+# staleness rule as the particle-box path). Storage sparsity is a later stage.
+
+
+@wp.kernel
+def blocks_mark(particle_x: wp.array(dtype=wp.vec3), inv_dx: float, bd: wp.vec3i,
+                mask: wp.array(dtype=int, ndim=3)):
+    p = wp.tid()
+    bx = wp.clamp(int(particle_x[p][0] * inv_dx - 0.5) >> 2, 0, bd[0] - 1)
+    by = wp.clamp(int(particle_x[p][1] * inv_dx - 0.5) >> 2, 0, bd[1] - 1)
+    bz = wp.clamp(int(particle_x[p][2] * inv_dx - 0.5) >> 2, 0, bd[2] - 1)
+    mask[bx, by, bz] = 1
+
+
+@wp.kernel
+def blocks_dilate(src: wp.array(dtype=int, ndim=3), bd: wp.vec3i,
+                  dst: wp.array(dtype=int, ndim=3)):
+    x, y, z = wp.tid()
+    on = int(0)
+    for i in range(-1, 2):
+        for j in range(-1, 2):
+            for k in range(-1, 2):
+                xi = wp.clamp(x + i, 0, bd[0] - 1)
+                yj = wp.clamp(y + j, 0, bd[1] - 1)
+                zk = wp.clamp(z + k, 0, bd[2] - 1)
+                if src[xi, yj, zk] == 1:
+                    on = 1
+    dst[x, y, z] = on
+
+
+@wp.kernel
+def blocks_compact(cur: wp.array(dtype=int, ndim=3), prev: wp.array(dtype=int, ndim=3),
+                   bd: wp.vec3i, cur_list: wp.array(dtype=int),
+                   union_list: wp.array(dtype=int), counts: wp.array(dtype=int)):
+    x, y, z = wp.tid()
+    code = (x * bd[1] + y) * bd[2] + z
+    c = cur[x, y, z]
+    if c == 1:
+        i = wp.atomic_add(counts, 0, 1)
+        cur_list[i] = code
+    if c == 1 or prev[x, y, z] == 1:
+        j = wp.atomic_add(counts, 1, 1)
+        union_list[j] = code
+
+
+@wp.func
+def _block_node(code: int, cell: int, bd: wp.vec3i):
+    bz = code % bd[2]
+    r = code // bd[2]
+    by = r % bd[1]
+    bx = r // bd[1]
+    return wp.vec3i(bx * 4 + (cell >> 4), by * 4 + ((cell >> 2) & 3), bz * 4 + (cell & 3))
+
+
+@wp.kernel
+def zero_grid_blocks(state: MPMStateStruct, model: MPMModelStruct,
+                     blist: wp.array(dtype=int), bd: wp.vec3i):
+    t = wp.tid()
+    n = _block_node(blist[t >> 6], t & 63, bd)
+    if n[0] < model.grid_dim_x and n[1] < model.grid_dim_y and n[2] < model.grid_dim_z:
+        state.grid_m[n[0], n[1], n[2]] = 0.0
+        state.grid_v_in[n[0], n[1], n[2]] = wp.vec3(0.0, 0.0, 0.0)
+        state.grid_v_out[n[0], n[1], n[2]] = wp.vec3(0.0, 0.0, 0.0)
+
+
+@wp.kernel
+def grid_normalization_and_gravity_blocks(state: MPMStateStruct, model: MPMModelStruct,
+                                          dt: float, blist: wp.array(dtype=int),
+                                          bd: wp.vec3i):
+    t = wp.tid()
+    n = _block_node(blist[t >> 6], t & 63, bd)
+    if n[0] < model.grid_dim_x and n[1] < model.grid_dim_y and n[2] < model.grid_dim_z:
+        if state.grid_m[n[0], n[1], n[2]] > 1e-15:
+            v_out = state.grid_v_in[n[0], n[1], n[2]] * (
+                1.0 / state.grid_m[n[0], n[1], n[2]]
+            )
+            v_out = v_out + dt * model.gravitational_accelaration
+            state.grid_v_out[n[0], n[1], n[2]] = v_out
+
+
+@wp.kernel
+def add_damping_via_grid_blocks(state: MPMStateStruct, model: MPMModelStruct,
+                                scale: float, blist: wp.array(dtype=int), bd: wp.vec3i):
+    t = wp.tid()
+    n = _block_node(blist[t >> 6], t & 63, bd)
+    if n[0] < model.grid_dim_x and n[1] < model.grid_dim_y and n[2] < model.grid_dim_z:
+        state.grid_v_out[n[0], n[1], n[2]] = state.grid_v_out[n[0], n[1], n[2]] * scale

@@ -280,6 +280,11 @@ class MPM_Simulator_WARP:
         # error falls back to live launches for the rest of the run.
         self.use_cuda_graph = True
         self._graph_A = None
+        # active-block sparse compute (enable via rebuild_active_blocks, driven per tick
+        # by core.Solver when Solver.sparse=True). Takes precedence over the CUDA-graph
+        # path (its launch dims vary per tick) and over the particle-box restriction.
+        self.sparse_ready = False
+        self._blk = None
         self._graph_B = None
         self._graph_sig = None
         self._graph_warmup = 0
@@ -762,6 +767,52 @@ class MPM_Simulator_WARP:
             v_cm_torch[:] = torch.from_numpy(v_cm_np.astype(np.float32)).to(v_cm_torch.device)
             omega_torch[:] = torch.from_numpy(omega_np.astype(np.float32)).to(omega_torch.device)
 
+    def rebuild_active_blocks(self, device="cpu"):
+        """Rebuild the 4^3 active-block list from current particle positions (call once
+        per control tick). Marks each particle's stencil-base block, dilates by one block
+        (stencil crossing + intra-tick motion), compacts to a current list and a union
+        list with the previous tick (union feeds zeroing so departing nodes clear once).
+        One small device-to-host readback per call (the two counts)."""
+        if self._blk is None:
+            bd = (int(np.ceil(self.mpm_model.grid_dim_x / 4)),
+                  int(np.ceil(self.mpm_model.grid_dim_y / 4)),
+                  int(np.ceil(self.mpm_model.grid_dim_z / 4)))
+            nb = bd[0] * bd[1] * bd[2]
+            self._blk = {
+                "bd": bd,
+                "raw": wp.zeros(bd, dtype=int, device=device),
+                "cur": wp.zeros(bd, dtype=int, device=device),
+                "prev": wp.zeros(bd, dtype=int, device=device),
+                "cur_list": wp.zeros(nb, dtype=int, device=device),
+                "union_list": wp.zeros(nb, dtype=int, device=device),
+                "counts": wp.zeros(2, dtype=int, device=device),
+                "cur_n": 0,
+                "union_n": 0,
+            }
+        b = self._blk
+        b["prev"], b["cur"] = b["cur"], b["prev"]
+        b["raw"].zero_()
+        bd_v = wp.vec3i(b["bd"][0], b["bd"][1], b["bd"][2])
+        wp.launch(kernel=blocks_mark, dim=self.n_particles,
+                  inputs=[self.mpm_state.particle_x, self.mpm_model.inv_dx, bd_v,
+                          b["raw"]], device=device)
+        wp.launch(kernel=blocks_dilate, dim=b["bd"],
+                  inputs=[b["raw"], bd_v, b["cur"]], device=device)
+        b["counts"].zero_()
+        wp.launch(kernel=blocks_compact, dim=b["bd"],
+                  inputs=[b["cur"], b["prev"], bd_v, b["cur_list"], b["union_list"],
+                          b["counts"]], device=device)
+        c = b["counts"].numpy()
+        b["cur_n"], b["union_n"] = int(c[0]), int(c[1])
+        self.sparse_ready = True
+
+    def active_block_fraction(self):
+        """Fraction of grid blocks in the current active set (diagnostics/benchmarks)."""
+        if not self.sparse_ready:
+            return 1.0
+        bd = self._blk["bd"]
+        return self._blk["cur_n"] / float(bd[0] * bd[1] * bd[2])
+
     def _capture_substep_graphs(self, dt, device, grid_size):
         """CUDA-graph capture of the fixed-shape substep segments (speedup_plan Step 3).
         Segment A: zero -> stress -> p2g -> normalize (+ damping when enabled); segment
@@ -802,8 +853,10 @@ class MPM_Simulator_WARP:
         # CUDA graph fast path: replay the fixed-shape inner segments as graphs. The
         # first substep runs live so warp modules JIT-load before capture; particle
         # modifiers take self.time per substep so their presence disables capture.
+        sparse = self.sparse_ready and self.restrict_grid
         use_graph = (
             self.use_cuda_graph
+            and not sparse
             and self._graph_warmup > 0
             and str(device).startswith("cuda")
             and not self.pre_p2g_operations
@@ -821,7 +874,15 @@ class MPM_Simulator_WARP:
                     use_graph = False
         self._graph_warmup = 1
 
-        if use_graph:
+        if sparse:
+            self._prev_grid_box = None
+            b = self._blk
+            bd_v = wp.vec3i(b["bd"][0], b["bd"][1], b["bd"][2])
+            if b["union_n"] > 0:
+                wp.launch(kernel=zero_grid_blocks, dim=b["union_n"] * 64,
+                          inputs=[self.mpm_state, self.mpm_model, b["union_list"], bd_v],
+                          device=device)
+        elif use_graph:
             # graphs zero and normalize the FULL grid (dense sweeps are cheap on GPU;
             # the box restriction stays a CPU optimization), so no union bookkeeping
             self._prev_grid_box = None
@@ -905,20 +966,39 @@ class MPM_Simulator_WARP:
             with wp.ScopedTimer(
                 "grid_update", synchronize=self.profile, active=self.profile, print=False, dict=self.time_profile
             ):
-                wp.launch(
-                    kernel=grid_normalization_and_gravity,
-                    dim=g_dims,
-                    inputs=[self.mpm_state, self.mpm_model, dt, g_lo],
-                    device=device,
-                )
+                if sparse:
+                    b = self._blk
+                    bd_v = wp.vec3i(b["bd"][0], b["bd"][1], b["bd"][2])
+                    if b["cur_n"] > 0:
+                        wp.launch(kernel=grid_normalization_and_gravity_blocks,
+                                  dim=b["cur_n"] * 64,
+                                  inputs=[self.mpm_state, self.mpm_model, dt,
+                                          b["cur_list"], bd_v], device=device)
+                else:
+                    wp.launch(
+                        kernel=grid_normalization_and_gravity,
+                        dim=g_dims,
+                        inputs=[self.mpm_state, self.mpm_model, dt, g_lo],
+                        device=device,
+                    )
 
             if self.mpm_model.grid_v_damping_scale < 1.0:
-                wp.launch(
-                    kernel=add_damping_via_grid,
-                    dim=g_dims,
-                    inputs=[self.mpm_state, self.mpm_model.grid_v_damping_scale, g_lo],
-                    device=device,
-                )
+                if sparse:
+                    b = self._blk
+                    bd_v = wp.vec3i(b["bd"][0], b["bd"][1], b["bd"][2])
+                    if b["cur_n"] > 0:
+                        wp.launch(kernel=add_damping_via_grid_blocks,
+                                  dim=b["cur_n"] * 64,
+                                  inputs=[self.mpm_state, self.mpm_model,
+                                          self.mpm_model.grid_v_damping_scale,
+                                          b["cur_list"], bd_v], device=device)
+                else:
+                    wp.launch(
+                        kernel=add_damping_via_grid,
+                        dim=g_dims,
+                        inputs=[self.mpm_state, self.mpm_model.grid_v_damping_scale, g_lo],
+                        device=device,
+                    )
 
         # apply BC on grid
         with wp.ScopedTimer(

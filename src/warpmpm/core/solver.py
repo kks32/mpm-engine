@@ -48,6 +48,11 @@ class Solver:
     # GPU runs (where the captured graphs sweep the full grid and ignore the box anyway) can
     # raise this to amortize the sync, at the cost of the edge guard firing that much later.
     guard_interval: int = 1
+    # active-block sparse compute: grid sweeps run over 4^3 blocks containing material
+    # (rebuilt each tick) instead of the dense grid or its bounding box. Wins when the
+    # occupied region is not box-shaped (separated bodies, spread fluid, large empty
+    # domains). Storage stays dense; takes precedence over the CUDA-graph fast path.
+    sparse: bool = False
     _sim: Any = field(default=None, init=False, repr=False)
     _step: int = field(default=0, init=False, repr=False)
     _tick: int = field(default=0, init=False, repr=False)
@@ -168,6 +173,8 @@ class Solver:
     def step(self, dt: float, substeps: int = 1) -> Solver:
         if self._tick % max(1, self.guard_interval) == 0:
             self._update_grid_box(dt, substeps)
+        if self.sparse:
+            self._sim.rebuild_active_blocks(self.device)
         self._tick += 1
         for _ in range(substeps):
             self._sim.p2g2p(self._step, dt, device=self.device)
