@@ -255,6 +255,12 @@ class MPM_Simulator_WARP:
         self.grid_postprocess = []
         self.collider_params = []
         self.modify_bc = []
+        # per-collider host callables returning the current (lo_index, dim) grid box the
+        # collider can touch, or None to skip the launch this substep; entry None means the
+        # collider has no box (full-grid fallback). restrict_bc=False disables restriction
+        # (used by the equivalence test).
+        self.collider_aabbs = []
+        self.restrict_bc = True
 
         self.tailored_struct_for_bc = MPMtailoredStruct()
         self.pre_p2g_operations = []
@@ -816,18 +822,34 @@ class MPM_Simulator_WARP:
             "apply_BC_on_grid", synchronize=True, print=False, dict=self.time_profile
         ):
             for k in range(len(self.grid_postprocess)):
-                wp.launch(
-                    kernel=self.grid_postprocess[k],
-                    dim=grid_size,
-                    inputs=[
-                        self.time,
-                        dt,
-                        self.mpm_state,
-                        self.mpm_model,
-                        self.collider_params[k],
-                    ],
-                    device=device,
-                )
+                # restrict the launch to the collider's current grid box when it has one;
+                # a None box means the collider is outside the domain (skip the launch but
+                # still integrate its pose below)
+                lo_v = wp.vec3i(0, 0, 0)
+                dims = grid_size
+                skip = False
+                fn = self.collider_aabbs[k] if k < len(self.collider_aabbs) else None
+                if self.restrict_bc and fn is not None:
+                    box = fn()
+                    if box is None:
+                        skip = True
+                    else:
+                        lo_v = wp.vec3i(int(box[0][0]), int(box[0][1]), int(box[0][2]))
+                        dims = box[1]
+                if not skip:
+                    wp.launch(
+                        kernel=self.grid_postprocess[k],
+                        dim=dims,
+                        inputs=[
+                            self.time,
+                            dt,
+                            self.mpm_state,
+                            self.mpm_model,
+                            self.collider_params[k],
+                            lo_v,
+                        ],
+                        device=device,
+                    )
                 if self.modify_bc[k] is not None:
                     self.modify_bc[k](self.time, dt, self.collider_params[k])
 
@@ -1109,6 +1131,18 @@ class MPM_Simulator_WARP:
             print(key, sum(value))
 
     # a surface specified by a point and the normal vector
+    def _grid_box(self, lo_w, hi_w, halo=1):
+        """World-space box -> clamped grid-index (lo, dim) for a restricted BC launch, or
+        None when the box misses the grid entirely."""
+        dx = self.mpm_model.dx
+        n = (self.mpm_model.grid_dim_x, self.mpm_model.grid_dim_y, self.mpm_model.grid_dim_z)
+        lo = [max(0, int(np.floor(float(lo_w[i]) / dx)) - halo) for i in range(3)]
+        hi = [min(n[i], int(np.ceil(float(hi_w[i]) / dx)) + halo + 1) for i in range(3)]
+        dims = (hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2])
+        if dims[0] <= 0 or dims[1] <= 0 or dims[2] <= 0:
+            return None
+        return (tuple(lo), dims)
+
     def add_surface_collider(
         self,
         point,
@@ -1165,8 +1199,12 @@ class MPM_Simulator_WARP:
             state: MPMStateStruct,
             model: MPMModelStruct,
             param: Dirichlet_collider,
+            lo: wp.vec3i,
         ):
             grid_x, grid_y, grid_z = wp.tid()
+            grid_x = grid_x + lo[0]
+            grid_y = grid_y + lo[1]
+            grid_z = grid_z + lo[2]
             if time >= param.start_time and time < param.end_time:
                 offset = wp.vec3(
                     float(grid_x) * model.dx - param.point[0],
@@ -1215,6 +1253,26 @@ class MPM_Simulator_WARP:
                             v[0], v[1], v[2]
                         )
 
+        # restricted-launch box: an axis-aligned plane affects only the half-space
+        # behind it, a thin slab when the plane sits near a domain face (the floor).
+        # General planes keep the full-grid fallback (entry None).
+        _axis = next((i for i in range(3) if abs(abs(normal[i]) - 1.0) < 1e-6), -1)
+        if _axis >= 0:
+            _p_ax, _sgn = float(point[_axis]), float(normal[_axis])
+
+            def plane_aabb(axis=_axis, p_ax=_p_ax, sgn=_sgn, self=self):
+                big = 1.0e9
+                lo_w = [-big, -big, -big]
+                hi_w = [big, big, big]
+                if sgn > 0.0:
+                    hi_w[axis] = p_ax
+                else:
+                    lo_w[axis] = p_ax
+                return self._grid_box(lo_w, hi_w, halo=1)
+
+            self.collider_aabbs.append(plane_aabb)
+        else:
+            self.collider_aabbs.append(None)
         self.grid_postprocess.append(collide)
         self.modify_bc.append(None)
 
@@ -1258,8 +1316,12 @@ class MPM_Simulator_WARP:
             state: MPMStateStruct,
             model: MPMModelStruct,
             param: Dirichlet_collider,
+            lo: wp.vec3i,
         ):
             grid_x, grid_y, grid_z = wp.tid()
+            grid_x = grid_x + lo[0]
+            grid_y = grid_y + lo[1]
+            grid_z = grid_z + lo[2]
             if time >= param.start_time and time < param.end_time:
                 offset = wp.vec3(
                     float(grid_x) * model.dx - param.point[0],
@@ -1288,6 +1350,12 @@ class MPM_Simulator_WARP:
                     param.point[2] + dt * param.velocity[2],
                 )  # param.point + dt * param.velocity
 
+        def box_aabb(param=collider_param, self=self):
+            p, s = param.point, param.size
+            return self._grid_box((p[0] - s[0], p[1] - s[1], p[2] - s[2]),
+                                  (p[0] + s[0], p[1] + s[1], p[2] + s[2]), halo=1)
+
+        self.collider_aabbs.append(box_aabb)
         self.grid_postprocess.append(collide)
         self.modify_bc.append(modify)
 
@@ -1305,8 +1373,12 @@ class MPM_Simulator_WARP:
             state: MPMStateStruct,
             model: MPMModelStruct,
             param: Dirichlet_collider,
+            lo: wp.vec3i,
         ):
             grid_x, grid_y, grid_z = wp.tid()
+            grid_x = grid_x + lo[0]
+            grid_y = grid_y + lo[1]
+            grid_z = grid_z + lo[2]
             padding = 3
             if time >= param.start_time and time < param.end_time:
                 if grid_x < padding and state.grid_v_out[grid_x, grid_y, grid_z][0] < 0:
@@ -1357,6 +1429,7 @@ class MPM_Simulator_WARP:
                         0.0,
                     )
 
+        self.collider_aabbs.append(None)   # boundary shells: full-grid fallback
         self.grid_postprocess.append(collide)
         self.modify_bc.append(None)
 
@@ -1571,12 +1644,23 @@ class MPM_Simulator_WARP:
             state: MPMStateStruct,
             model: MPMModelStruct,
             param: PointCloudCollider,
+            lo: wp.vec3i,
         ):
             grid_x, grid_y, grid_z = wp.tid()
+            grid_x = grid_x + lo[0]
+            grid_y = grid_y + lo[1]
+            grid_z = grid_z + lo[2]
             if time >= param.start_time and time < param.end_time:
                 if param.occupancy_grid[grid_x, grid_y, grid_z] == 1:
                     state.grid_v_out[grid_x, grid_y, grid_z] = wp.vec3(0.0, 0.0, 0.0)
 
+        _occ = np.argwhere(occupancy == 1)
+        if len(_occ):
+            _pc_box = (tuple(int(v) for v in _occ.min(0)),
+                       tuple(int(_occ.max(0)[i] - _occ.min(0)[i] + 1) for i in range(3)))
+        else:
+            _pc_box = None
+        self.collider_aabbs.append(lambda box=_pc_box: box)
         self.grid_postprocess.append(collide)
         self.modify_bc.append(None)
 
@@ -1649,8 +1733,12 @@ class MPM_Simulator_WARP:
             state: MPMStateStruct,
             model: MPMModelStruct,
             param: SDFCollider,
+            lo: wp.vec3i,
         ):
             gx, gy, gz = wp.tid()
+            gx = gx + lo[0]
+            gy = gy + lo[1]
+            gz = gz + lo[2]
             if time >= param.start_time and time < param.end_time:
                 xw = wp.vec3(float(gx) * model.dx, float(gy) * model.dx, float(gz) * model.dx)
                 rel = xw - param.center
@@ -1718,6 +1806,18 @@ class MPM_Simulator_WARP:
                 q = _omega_step_quat(q, w, dt)
                 param.quat = wp.quat(float(q[0]), float(q[1]), float(q[2]), float(q[3]))
 
+        def sdf_aabb(param=param, corners=_corners, self=self):
+            qx, qy, qz, qw = param.quat[0], param.quat[1], param.quat[2], param.quat[3]
+            R = np.array([
+                [1 - 2 * (qy * qy + qz * qz), 2 * (qx * qy - qz * qw), 2 * (qx * qz + qy * qw)],
+                [2 * (qx * qy + qz * qw), 1 - 2 * (qx * qx + qz * qz), 2 * (qy * qz - qx * qw)],
+                [2 * (qx * qz - qy * qw), 2 * (qy * qz + qx * qw), 1 - 2 * (qx * qx + qy * qy)],
+            ])
+            c = np.array([param.center[0], param.center[1], param.center[2]])
+            pts = c + corners @ R.T
+            return self._grid_box(pts.min(axis=0), pts.max(axis=0), halo=1)
+
+        self.collider_aabbs.append(sdf_aabb)
         self.grid_postprocess.append(collide)
         self.modify_bc.append(modify)
         return len(self.collider_params) - 1
