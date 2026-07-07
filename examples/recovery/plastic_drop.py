@@ -22,13 +22,16 @@ import time
 from pathlib import Path
 
 import numpy as np
+import warp as wp
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 from examples.recovery.elastic_drop import _raw_points        # reuse the shape sampler
 
-DEVICE = "cpu"
+wp.config.quiet = True
+wp.init()
+DEVICE = "cuda:0" if wp.get_cuda_device_count() > 0 else "cpu"  # auto, like Solver(device="auto")
 OUT = ROOT / "out" / "plastic_drop"
 TRUTH = dict(E=1.0e6, nu=0.30, rho=1000.0, yield_stress=8.0e3)   # G=3.85e5, eps_y~1.04% (clearly yields)
 

@@ -21,9 +21,9 @@ embedded in a glass wall is counted, projected back out, and reported; the run f
 loudly if the audit ever grows past a fraction of the fill.
 
 Run:
-  python examples/pour_franka.py --device cuda:0
-  python examples/pour_franka.py --device cuda:0 --fast          # coarse smoke run (96^3)
-  python examples/pour_franka.py --device cuda:0 --skip-video    # metrics only
+  python examples/pour_franka.py                    # device auto-resolves (cuda:0 if present)
+  python examples/pour_franka.py --fast             # coarse smoke run (96^3)
+  python examples/pour_franka.py --skip-video       # metrics only
 
 Outputs (out/pour_franka/):
   pour_franka.mp4    composite MuJoCo render: arm + glasses + honey (60 fps)
@@ -148,7 +148,7 @@ def level_volume(x_world, pos, quat, h: float) -> float:
     return PROFILE.cavity_volume(depth)
 
 
-def run(device: str = "cuda:0", n_grid: int = 192, video: bool = True,
+def run(device: str = "auto", n_grid: int = 192, video: bool = True,
         rebake: bool = False, render_stride: int = 1) -> dict:
     OUT.mkdir(parents=True, exist_ok=True)
     mesh_path = write_glass_obj(PROFILE, OUT / "glass_render.obj")
@@ -349,7 +349,8 @@ def run(device: str = "cuda:0", n_grid: int = 192, video: bool = True,
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--device", default="cuda:0", help="Warp device, e.g. cuda:0 or cuda:1")
+    ap.add_argument("--device", default="auto",
+                    help="Warp device: auto (cuda if available), cuda:N, or cpu")
     ap.add_argument("--n-grid", type=int, default=192)
     ap.add_argument("--fast", action="store_true", help="coarse smoke run (n_grid 96)")
     ap.add_argument("--skip-video", action="store_true")
