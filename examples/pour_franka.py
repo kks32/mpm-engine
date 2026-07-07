@@ -24,6 +24,12 @@ Run:
   python examples/pour_franka.py                    # device auto-resolves (cuda:0 if present)
   python examples/pour_franka.py --fast             # coarse smoke run (96^3)
   python examples/pour_franka.py --skip-video       # metrics only
+  python examples/pour_franka.py --fast --record    # sim now, render after in a FRESH
+                                                    # GL-only subprocess. Use this on
+                                                    # GH200/Vista nodes: GL and heavy CUDA
+                                                    # sharing one process fault the driver
+                                                    # (dmesg Xid 31/109); each alone is fine.
+  python examples/pour_franka.py --render-only --n-grid 96   # re-render a recording
 
 Outputs (out/pour_franka/):
   pour_franka.mp4    composite MuJoCo render: arm + glasses + honey (60 fps)
@@ -31,11 +37,14 @@ Outputs (out/pour_franka/):
   pour_metrics.png   receiver/spill fractions + glass wrenches vs time
   final_*.npz        end-state particles for volume/bed-density analysis
   settled_*.npz      cached settled particle state (delete or --rebake to refresh)
+  _rec_n*/           --record frame dumps (positions, speeds, glass pose per frame)
 """
 from __future__ import annotations
 
 import argparse
 import csv
+import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -103,6 +112,78 @@ def substeps_per_tick(liq: dict, dx: float, dt_tick: float) -> int:
     return int(np.ceil(dt_tick * max(acoustic, viscous)))
 
 
+def make_arm(mesh_path: Path) -> PandaPour:
+    arm = PandaPour(height=720, width=1280, max_geom=360000,  # every particle at 192^3
+                    glass_mesh=mesh_path, glass_rgba=GLASS_RGBA)
+    arm.set_glass_pose("glass_rcv", RECEIVER_POS, Q_ID)  # static receiver, set once
+    arm.cam.lookat[:] = CAMERA["lookat"]
+    arm.cam.distance = CAMERA["distance"]
+    arm.cam.azimuth = CAMERA["azimuth"]
+    arm.cam.elevation = CAMERA["elevation"]
+    return arm
+
+
+def render_frame(arm: PandaPour, x_world, spd, p_now, q_now, t_now: float, h: float):
+    """One composite frame: arm at t, source glass at (p, q), particles colored by speed."""
+    arm.set_glass_pose("glass_src", p_now, q_now)
+    arm.set_time(t_now)
+    col = np.tile(LIQUID_RGBA, (len(x_world), 1)).astype(np.float32)
+    col[:, :3] = np.clip(
+        col[:, :3] + 0.35 * np.clip(spd / 2.0, 0, 1)[:, None], 0, 1
+    )  # brighten fast liquid
+    handle_c = p_now + quat_to_mat(q_now) @ arm.GRASP_LOCAL
+    return arm.render_with_particles(
+        x_world, col, radius=0.85 * h,
+        table=(0.19, -0.18, 0.0, 0.85),
+        boxes=[
+            (handle_c, (0.060, 0.025, 0.050), HANDLE_RGBA, quat_to_mat(q_now)),
+            ((0.10, 0.50, 0.70), (1.60, 0.02, 0.75), BACKDROP_RGBA),  # backdrop
+        ],
+    )
+
+
+def write_mp4(frames_dir: Path, fps: int) -> Path:
+    import imageio.v2 as imageio
+
+    mp4 = OUT / "pour_franka.mp4"
+    with imageio.get_writer(mp4, fps=fps, codec="libx264",
+                            quality=8, macro_block_size=2,
+                            # moov atom up front: streamable/previewable in IDEs
+                            output_params=["-movflags", "+faststart"]) as wtr:
+        for p in sorted(frames_dir.glob("f_*.png")):
+            wtr.append_data(imageio.imread(p))
+    return mp4
+
+
+def render_recording(n_grid: int) -> Path:
+    """Render a --record dump to mp4. Runs in its own process with no warp compute, so
+    it is safe on nodes where GL + heavy CUDA in one process fault the driver."""
+    rec_dir = OUT / f"_rec_n{n_grid}"
+    files = sorted(rec_dir.glob("f_*.npz"))
+    if not files:
+        raise SystemExit(f"no recorded frames in {rec_dir}; run with --record first")
+    meta = np.load(rec_dir / "meta.npz")
+    arm = make_arm(write_glass_obj(PROFILE, OUT / "glass_render.obj"))
+    frames_dir = OUT / "_frames"
+    frames_dir.mkdir(exist_ok=True)
+    for stale in frames_dir.glob("f_*.png"):
+        stale.unlink()
+    import imageio.v2 as imageio
+
+    t0 = time.time()
+    for i, fp in enumerate(files):
+        d = np.load(fp)
+        img = render_frame(arm, d["x"], d["spd"].astype(np.float32), d["p"], d["q"],
+                           float(d["t"]), float(meta["h"]))
+        imageio.imwrite(frames_dir / f"f_{i:04d}.png", img)
+        if i % 60 == 0 or i == len(files) - 1:
+            print(f"render {i+1:3d}/{len(files)} [{(time.time()-t0)/(i+1)*1000:.0f}ms/frame]")
+    arm.close()
+    mp4 = write_mp4(frames_dir, fps=int(meta["fps"]))
+    print("wrote", mp4)
+    return mp4
+
+
 def build_scene(device: str, n_grid: int, arm: PandaPour):
     grid = GridConfig(n_grid=n_grid, grid_lim=GRID_LIM)
     h = grid.dx / 2
@@ -149,16 +230,10 @@ def level_volume(x_world, pos, quat, h: float) -> float:
 
 
 def run(device: str = "auto", n_grid: int = 192, video: bool = True,
-        rebake: bool = False, render_stride: int = 1) -> dict:
+        record: bool = False, rebake: bool = False, render_stride: int = 1,
+        frames: int | None = None) -> dict:
     OUT.mkdir(parents=True, exist_ok=True)
-    mesh_path = write_glass_obj(PROFILE, OUT / "glass_render.obj")
-    arm = PandaPour(height=720, width=1280, max_geom=360000,  # every particle at 192^3
-                    glass_mesh=mesh_path, glass_rgba=GLASS_RGBA)
-    arm.set_glass_pose("glass_rcv", RECEIVER_POS, Q_ID)  # static receiver, set once
-    arm.cam.lookat[:] = CAMERA["lookat"]
-    arm.cam.distance = CAMERA["distance"]
-    arm.cam.azimuth = CAMERA["azimuth"]
-    arm.cam.elevation = CAMERA["elevation"]
+    arm = make_arm(write_glass_obj(PROFILE, OUT / "glass_render.obj"))
 
     s, grid, src, rcv, vol = build_scene(device, n_grid, arm)
     h = grid.dx / 2
@@ -168,6 +243,8 @@ def run(device: str = "auto", n_grid: int = 192, video: bool = True,
     substeps = substeps_per_tick(HONEY, grid.dx, dt_tick)
     dt = dt_tick / substeps
     n_frames = round((arm.duration + HOLD_SECONDS) * FPS)  # pose clamps home after duration
+    if frames is not None:
+        n_frames = min(n_frames, frames)
     print(f"n_grid={n_grid} dx={grid.dx*1000:.2f}mm N={n0} honey={m_liq:.2f}kg "
           f"dt={dt:.2e} ({substeps} substeps/frame, CFL={sound_speed(HONEY)*dt/grid.dx:.2f}) "
           f"{n_frames} frames")
@@ -203,6 +280,12 @@ def run(device: str = "auto", n_grid: int = 192, video: bool = True,
         for stale in frames_dir.glob("f_*.png"):  # a rerun must not keep old tail frames
             stale.unlink()
         import imageio.v2 as imageio
+    rec_dir = OUT / f"_rec_n{n_grid}"
+    if record:
+        rec_dir.mkdir(exist_ok=True)
+        for stale in rec_dir.glob("f_*.npz"):
+            stale.unlink()
+        np.savez(rec_dir / "meta.npz", h=h, fps=FPS // render_stride, n_grid=n_grid)
     rows = []
     max_embedded = 0
     proj_total = 0
@@ -259,25 +342,18 @@ def run(device: str = "auto", n_grid: int = 192, video: bool = True,
             embedded=ns_src + ns_rcv, projected=proj_total,
         ))
 
-        if video and frame % render_stride == 0:
-            arm.set_glass_pose("glass_src", p_now, q_now)
-            arm.set_time(t_now)
-            pts = x - WORLD_TO_MPM
-            spd = np.linalg.norm(v, axis=1)
-            col = np.tile(LIQUID_RGBA, (len(pts), 1)).astype(np.float32)
-            col[:, :3] = np.clip(
-                col[:, :3] + 0.35 * np.clip(spd / 2.0, 0, 1)[:, None], 0, 1
-            )  # brighten fast liquid
-            handle_c = p_now + quat_to_mat(q_now) @ arm.GRASP_LOCAL
-            img = arm.render_with_particles(
-                pts, col, radius=0.85 * h,
-                table=(0.19, -0.18, 0.0, 0.85),
-                boxes=[
-                    (handle_c, (0.060, 0.025, 0.050), HANDLE_RGBA, quat_to_mat(q_now)),
-                    ((0.10, 0.50, 0.70), (1.60, 0.02, 0.75), BACKDROP_RGBA),  # backdrop
-                ],
-            )
-            imageio.imwrite(frames_dir / f"f_{frame//render_stride:04d}.png", img)
+        if frame % render_stride == 0:
+            if video:
+                img = render_frame(arm, x - WORLD_TO_MPM, np.linalg.norm(v, axis=1),
+                                   p_now, q_now, t_now, h)
+                imageio.imwrite(frames_dir / f"f_{frame//render_stride:04d}.png", img)
+            elif record:
+                # positions f32 (f16 would quantize to ~0.3 mm over the 0.7 m domain),
+                # speeds f16 (color only): ~0.6 MB/frame at 40k particles
+                np.savez(rec_dir / f"f_{frame//render_stride:04d}.npz",
+                         x=(x - WORLD_TO_MPM).astype(np.float32),
+                         spd=np.linalg.norm(v, axis=1).astype(np.float16),
+                         p=p_now, q=q_now, t=t_now)
 
         if frame % 30 == 0 or frame == n_frames - 1:
             el = time.time() - t_start
@@ -327,14 +403,7 @@ def run(device: str = "auto", n_grid: int = 192, video: bool = True,
 
     mp4 = None
     if video:
-        import imageio.v2 as imageio
-        mp4 = OUT / "pour_franka.mp4"
-        with imageio.get_writer(mp4, fps=FPS // render_stride, codec="libx264",
-                                quality=8, macro_block_size=2,
-                                # moov atom up front: streamable/previewable in IDEs
-                                output_params=["-movflags", "+faststart"]) as wtr:
-            for p in sorted(frames_dir.glob("f_*.png")):
-                wtr.append_data(imageio.imread(p))
+        mp4 = write_mp4(frames_dir, fps=FPS // render_stride)
         print("wrote", mp4)
     # end-state particles for post-hoc volume analysis: the level metric over-reads on
     # viscous mounds, so bed density must be read from particles-per-cell, not levels
@@ -344,6 +413,18 @@ def run(device: str = "auto", n_grid: int = 192, video: bool = True,
     print(f"final: receiver {r['frac_rcv'][-1]*100:.1f}% spill/air {r['frac_spill'][-1]*100:.1f}% "
           f"| max embedded ever {max_embedded} | total projected {proj_total}")
     arm.close()
+
+    if record:
+        n_rec = len(list(rec_dir.glob("f_*.npz")))
+        print(f"recorded {n_rec} frames -> {rec_dir}")
+        cmd = [sys.executable, str(Path(__file__).resolve()),
+               "--render-only", "--n-grid", str(n_grid)]
+        print("rendering in a fresh GL-only process (GL + CUDA compute must not share "
+              "a process on GH200 nodes):", " ".join(cmd))
+        if subprocess.run(cmd).returncode == 0:
+            mp4 = OUT / "pour_franka.mp4"
+        else:
+            print("post-render failed; the recording is kept, rerun:", " ".join(cmd))
     return {"rows": rows, "mp4": mp4, "max_embedded": max_embedded, "n0": n0}
 
 
@@ -354,7 +435,18 @@ if __name__ == "__main__":
     ap.add_argument("--n-grid", type=int, default=192)
     ap.add_argument("--fast", action="store_true", help="coarse smoke run (n_grid 96)")
     ap.add_argument("--skip-video", action="store_true")
+    ap.add_argument("--record", action="store_true",
+                    help="dump render state during the sim, then render it in a fresh "
+                         "GL-only subprocess (use on GH200/Vista: inline GL faults)")
+    ap.add_argument("--render-only", action="store_true",
+                    help="render an existing --record dump to mp4 (no simulation)")
     ap.add_argument("--rebake", action="store_true", help="refresh the settled cache")
+    ap.add_argument("--frames", type=int, default=None,
+                    help="cap the number of frames (smoke/debug)")
     args = ap.parse_args()
-    run(device=args.device, n_grid=96 if args.fast else args.n_grid,
-        video=not args.skip_video, rebake=args.rebake)
+    if args.render_only:
+        render_recording(96 if args.fast else args.n_grid)
+    else:
+        run(device=args.device, n_grid=96 if args.fast else args.n_grid,
+            video=not args.skip_video and not args.record, record=args.record,
+            rebake=args.rebake, frames=args.frames)
