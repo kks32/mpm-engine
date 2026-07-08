@@ -95,7 +95,8 @@ No code copied from any of these.
 - GPUMPM (github.com/kuiwuchn/GPUMPM), Gao et al., SIGGRAPH Asia 2018. GPLv3: design
   only. Two-level sparse-block layout of the active-block compute.
 - PhysGaussian (github.com/XPandora/PhysGaussian), Xie et al., BibTeX above. No license
-  file: design only. The covariance hooks in `kernels/` serve this coupling.
+  file: design only. The covariance hooks in `kernels/` serve this coupling. Filling and
+  coupling-loop algorithms reimplemented from its code and paper.
 - GeoWarp. Reference for the planned implicit quasi-static solver. License unchecked.
 - Genesis (github.com/Genesis-Embodied-AI/Genesis), Apache-2.0. Scene geometry, poses,
   and robot trajectory of the pour example.

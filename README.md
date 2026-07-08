@@ -39,6 +39,8 @@ What exists:
   projection.
 - `coupling/`: grid-impulse (Newton-exact) and stress-integral wrench readouts;
   two-way force feedback (the arm halts on the dough).
+- `splats/`: Gaussian-splat scenes, PhysGaussian style. PLY load/save, interior fill,
+  per-particle covariance advection and polar-rotation SH; see `examples/splat_sim.py`.
 - `adapters/mujoco_adapter.py`: Franka arm, scripted press and pour kinematics,
   composite offscreen rendering of arm + glasses + particles.
 - `src/ident/`, `src/common/`: the warp-free EUCLID identification stack (weak-form
@@ -89,19 +91,6 @@ ruff check . && ty check
 On clusters where GL and CUDA must not share a process (GH200 nodes), use `--record`:
 the simulation dumps per-frame render state and re-invokes itself as a GL-only
 subprocess (`--render-only`), with frames split across parallel workers.
-
-## Roadmap
-
-1. DONE: primitive-SDF and mesh-SDF moving colliders, `set_robot_kinematics`.
-2. DONE: per-link wrench readout (Newton-exact grid impulse) + cross-validation.
-3. DONE: MuJoCo arm, dough manipulation, pouring, composite render.
-4. DONE: restricted launches, sparse active-block grid, CUDA graphs, fused G2P2G,
-   block sort, mass-gated colliders, profiling.
-5. NEXT: implicit quasi-static solver (press/squeeze scenes; GeoWarp-style Newton-CG
-   with SDF Dirichlet contact), then an implicit density-projection liquid solver as a
-   separate dynamic path (real incompressibility for pouring). The explicit engine
-   stays the reference oracle for both.
-6. Learned constitutive residual (trainable seam); terrain on the same core.
 
 ## License, provenance, acknowledgments
 

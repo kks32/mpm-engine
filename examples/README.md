@@ -39,6 +39,10 @@ Rendering:
 
 - `dough_surface_render.py`: surface the particle cloud with marching cubes and render
   the dough as a continuous body. Needs the `surface` extra (scipy, scikit-image).
+- `splat_sim.py`: Gaussian-splat scene, PhysGaussian style. Drops a splat body, fills its
+  interior, then presses it with a scripted box collider; covariances advect and the SH
+  rotate with the deformation. `--ply` loads a real checkpoint. Needs the `splats` extra
+  (plyfile, scipy).
 
 `recovery/` holds the constitutive-recovery examples (elastic and plastic drops,
 sequential identification, sample complexity); see its README. Paper studies and figure
