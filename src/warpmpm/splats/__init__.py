@@ -9,6 +9,7 @@ that use them, so this package imports without the splats extra installed.
 from __future__ import annotations
 
 from .appearance import assign_filler_appearance, eval_sh
+from .bake import Baked4DSplats, bake
 from .export import (
     FrameRecorder,
     convert_to_sog,
@@ -27,11 +28,13 @@ from .scene import SplatScene
 from .transforms import SimTransform, fit_to_grid
 
 __all__ = [
+    "Baked4DSplats",
     "FrameRecorder",
     "GaussianCloud",
     "SimTransform",
     "SplatScene",
     "assign_filler_appearance",
+    "bake",
     "convert_to_sog",
     "cov6_to_scale_quat",
     "eval_sh",

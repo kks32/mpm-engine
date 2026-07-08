@@ -58,7 +58,8 @@ def _material(name: str):
 
 def run(material="dough", ply=None, fill=True, filler_appearance="inherit", filler_k=8,
         frames=40, grid_n=48, dt=2.0e-5, substeps=20, rasterize=False, device="auto",
-        out_name="splat_sim.mp4", render=True, record_splats=None, sh_mode="dc", sog=False):
+        out_name="splat_sim.mp4", render=True, record_splats=None, sh_mode="dc", sog=False,
+        bake_path=None):
     from warpmpm.core.solver import GridConfig
 
     grid = GridConfig(n_grid=grid_n, grid_lim=0.4)
@@ -92,6 +93,7 @@ def run(material="dough", ply=None, fill=True, filler_appearance="inherit", fill
     recorder = None
     if record_splats is not None:
         recorder = FrameRecorder(record_splats, sh_mode=sh_mode, fps=12)
+    bake_states, bake_times = [], []
 
     frame_dir = Path(tempfile.mkdtemp(prefix="splat_"))
     camera = None
@@ -107,6 +109,10 @@ def run(material="dough", ply=None, fill=True, filler_appearance="inherit", fill
         print(f"frame {f:3d}  max|v|={vmax:6.3f} m/s  fillers={n_filler}")
         if recorder is not None:
             recorder.capture(scene)
+        if bake_path is not None:
+            st = {k: v.detach().cpu().numpy().copy() for k, v in scene.state().items()}
+            bake_states.append(st)
+            bake_times.append((f + 1) * dt_ctrl)
         if render:
             st = scene.state()
             if camera is None:
@@ -125,12 +131,34 @@ def run(material="dough", ply=None, fill=True, filler_appearance="inherit", fill
         if sog:
             convert_to_sog(recorder.out_dir)
 
+    baked_report = None
+    if bake_path is not None:
+        from warpmpm.splats import bake as bake_fn
+        baked = bake_fn(bake_states, times=np.array(bake_times))
+        baked.save(bake_path)
+        baked_report = baked.report()
+        print(f"baked {baked_report['n_frames']} frames to {bake_path}: "
+              f"{baked_report['n_coef']} coefficients, "
+              f"max pos err {baked_report['max_pos_err']:.2e} m, "
+              f"compression {baked_report['compression_ratio']:.1f}x vs per-frame PLYs")
+
     mp4 = None
     if render:
         mp4 = write_mp4(frame_dir, OUT / out_name, fps=12)
     return {"n_gaussians": scene.n_gaussians, "n_filler": n_filler,
             "n_visible": scene.n_visible, "mp4": None if mp4 is None else str(mp4),
-            "splat_dir": splat_dir}
+            "splat_dir": splat_dir, "bake": baked_report}
+
+
+def from_bake(bake_path, out_dir, n_frames=None, fps=30.0, sh_mode="dc"):
+    """Write viewer PLY frames from a baked clip; no simulation. n_frames None writes
+    twice the recorded count (temporal upsampling); fps is the viewer playback hint."""
+    from warpmpm.splats import Baked4DSplats
+
+    baked = Baked4DSplats.load(bake_path)
+    paths = baked.write_frames(out_dir, n_frames=n_frames, fps=fps, sh_mode=sh_mode)
+    print(f"wrote {len(paths)} frames from {bake_path} to {out_dir}")
+    return paths
 
 
 def _fixed_camera(state, pad=1.4):
@@ -175,12 +203,28 @@ def main():
                         help="dc bakes the DC color; rotate turns SH into the deformed body frame")
     parser.add_argument("--sog", action="store_true",
                         help="convert recorded frames to .sog with the PlayCanvas CLI")
+    parser.add_argument("--bake", default=None, metavar="OUT.npz",
+                        help="bake the run's splat trajectory into temporal B-splines")
+    parser.add_argument("--from-bake", default=None, metavar="IN.npz",
+                        help="skip simulation; write viewer frames from a baked clip")
+    parser.add_argument("--bake-frames", type=int, default=None,
+                        help="frame count for --from-bake (default: 2x the recorded count)")
+    parser.add_argument("--bake-fps", type=float, default=30.0,
+                        help="viewer playback-rate hint written to the manifest")
+    parser.add_argument("--bake-out", default=None,
+                        help="output folder for --from-bake (default out/splat_baked)")
     args = parser.parse_args()
+    if args.from_bake is not None:
+        out_dir = args.bake_out or (OUT / "splat_baked")
+        from_bake(args.from_bake, out_dir, n_frames=args.bake_frames, fps=args.bake_fps,
+                  sh_mode=args.sh_mode)
+        return
     run(material=args.material, ply=args.ply, fill=args.fill,
         filler_appearance=args.filler_appearance, filler_k=args.filler_k,
         frames=args.frames, grid_n=args.grid, rasterize=args.rasterize,
         device=args.device, render=not args.no_render,
-        record_splats=args.record_splats, sh_mode=args.sh_mode, sog=args.sog)
+        record_splats=args.record_splats, sh_mode=args.sh_mode, sog=args.sog,
+        bake_path=args.bake)
 
 
 if __name__ == "__main__":

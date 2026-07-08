@@ -41,8 +41,10 @@ Rendering:
   the dough as a continuous body. Needs the `surface` extra (scipy, scikit-image).
 - `splat_sim.py`: Gaussian-splat scene, PhysGaussian style. Drops a splat body, fills its
   interior, then presses it with a scripted box collider; covariances advect and the SH
-  rotate with the deformation. `--ply` loads a real checkpoint. Needs the `splats` extra
-  (plyfile, scipy).
+  rotate with the deformation. `--ply` loads a real checkpoint; `--record-splats` writes
+  viewer frames; `--bake OUT.npz` compresses the run into temporal B-splines and
+  `--from-bake IN.npz` re-exports viewer frames at any frame count from the bake.
+  Needs the `splats` extra (plyfile, scipy).
 
 `recovery/` holds the constitutive-recovery examples (elastic and plastic drops,
 sequential identification, sample complexity); see its README. Paper studies and figure
