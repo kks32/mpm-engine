@@ -52,6 +52,9 @@ Layered onto the upstream solver by our group (from git authorship):
   Warp 1.x compatibility fixes.
 - **Krishna Kumar** (`krishnak@utexas.edu`): the Newton-exact grid-impulse contact-force
   (wrist-FT) readout on the velocity collider.
+- **Stepan Tretiakov** (`sdt2344@my.utexas.edu`): CUDA support and auto device resolution
+  across the entry points, the Warp 1.14 B-spline transpose fix, and the pressure
+  covariance sweep experiment.
 - The added constitutive models (ids 9-13: `mu_i_sand`, `newtonian`/Bingham/Herschel-Bulkley,
   `mu_i_phi`, `tabulated_viscous`, `tabulated_mu_i`), the local mu(I) / TrackEUCLID granular
   return mappings, and the dough fluid.
@@ -63,10 +66,7 @@ Everything outside `kernels/` (the `Solver` wrapper, `Material` factory, `coupli
 
 The Step 5 transfer-pipeline optimizations (the fused G2P2G particle pass, per-block
 particle binning/sorting, and the shared-memory arena design earmarked for the CUDA
-follow-up) port the architecture of **claymore**, read from Justin Bonus's fork
-(github.com/JustinBonus/claymore, ClaymoreUW lineage: multi-architecture builds and
-the OSU wave-flume/debris engineering projects). Claymore is MIT-licensed; design and
-any adapted fragments are used with citation:
+follow-up) port the architecture of [ClaymoreUW](github.com/JustinBonus/claymore).
 
 ```bibtex
 @article{wang2020massively,
