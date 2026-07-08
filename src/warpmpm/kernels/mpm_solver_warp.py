@@ -1456,6 +1456,10 @@ class MPM_Simulator_WARP:
             grid_x = grid_x + lo[0]
             grid_y = grid_y + lo[1]
             grid_z = grid_z + lo[2]
+            if state.grid_m[grid_x, grid_y, grid_z] <= 0.0:
+                # massless node: outside every particle stencil, so G2P never reads
+                # its velocity and its wrench contribution is zero; skipping is exact
+                return
             if time >= param.start_time and time < param.end_time:
                 offset = wp.vec3(
                     float(grid_x) * model.dx - param.point[0],
@@ -1573,6 +1577,10 @@ class MPM_Simulator_WARP:
             grid_x = grid_x + lo[0]
             grid_y = grid_y + lo[1]
             grid_z = grid_z + lo[2]
+            if state.grid_m[grid_x, grid_y, grid_z] <= 0.0:
+                # massless node: outside every particle stencil, so G2P never reads
+                # its velocity and its wrench contribution is zero; skipping is exact
+                return
             if time >= param.start_time and time < param.end_time:
                 offset = wp.vec3(
                     float(grid_x) * model.dx - param.point[0],
@@ -1676,6 +1684,10 @@ class MPM_Simulator_WARP:
             grid_x = grid_x + lo[0]
             grid_y = grid_y + lo[1]
             grid_z = grid_z + lo[2]
+            if state.grid_m[grid_x, grid_y, grid_z] <= 0.0:
+                # massless node: outside every particle stencil, so G2P never reads
+                # its velocity and its wrench contribution is zero; skipping is exact
+                return
             if time >= param.start_time and time < param.end_time:
                 x_node = wp.vec3(
                     float(grid_x) * model.dx,
@@ -1803,6 +1815,10 @@ class MPM_Simulator_WARP:
             grid_x = grid_x + lo[0]
             grid_y = grid_y + lo[1]
             grid_z = grid_z + lo[2]
+            if state.grid_m[grid_x, grid_y, grid_z] <= 0.0:
+                # massless node: outside every particle stencil, so G2P never reads
+                # its velocity and its wrench contribution is zero; skipping is exact
+                return
             padding = 3
             if time >= param.start_time and time < param.end_time:
                 if grid_x < padding and state.grid_v_out[grid_x, grid_y, grid_z][0] < 0:
@@ -2074,6 +2090,10 @@ class MPM_Simulator_WARP:
             grid_x = grid_x + lo[0]
             grid_y = grid_y + lo[1]
             grid_z = grid_z + lo[2]
+            if state.grid_m[grid_x, grid_y, grid_z] <= 0.0:
+                # massless node: outside every particle stencil, so G2P never reads
+                # its velocity and its wrench contribution is zero; skipping is exact
+                return
             if time >= param.start_time and time < param.end_time:
                 if param.occupancy_grid[grid_x, grid_y, grid_z] == 1:
                     state.grid_v_out[grid_x, grid_y, grid_z] = wp.vec3(0.0, 0.0, 0.0)
@@ -2163,6 +2183,8 @@ class MPM_Simulator_WARP:
             gx = gx + lo[0]
             gy = gy + lo[1]
             gz = gz + lo[2]
+            if state.grid_m[gx, gy, gz] <= 0.0:
+                return  # massless node: never read by G2P; skipping is exact
             if time >= param.start_time and time < param.end_time:
                 xw = wp.vec3(float(gx) * model.dx, float(gy) * model.dx, float(gz) * model.dx)
                 rel = xw - param.center
