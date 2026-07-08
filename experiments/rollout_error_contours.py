@@ -1,13 +1,13 @@
-"""Spatial ERROR-field contours of the held-out 3D shear rollout.
+"""Spatial error-field contours of the held-out 3D shear rollout.
 
-The deformation snapshots (rollout_snapshots.py) all look identical, so this shades WHERE each
+The deformation snapshots (rollout_snapshots.py) all look identical, so this shades where each
 model departs from truth. All four sims start from the same seeded block, so particles are in
 1:1 correspondence; the per-particle deviation |x_model - x_truth| (mm) is binned over the x-z
 plane and contour-shaded. Rows = FE / HB-ridge / Bingham, columns = time points. Reveals where
 the biggest deformation errors concentrate (and confirms they stay small, the kinematics being
 displacement-controlled, while the force carries the model difference).
 
-Run:  PYTHONPATH=src ../.venv/bin/python examples/rollout_error_contours.py
+Run:  python experiments/rollout_error_contours.py
 """
 from __future__ import annotations
 

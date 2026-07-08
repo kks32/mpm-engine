@@ -1,20 +1,20 @@
 """Strong-form (pointwise constitutive) vs weak-form (wall-force power balance) recovery.
 
 Both recover eta_app(gd) = sum_k theta_k g_k(gd), but from different data:
-  WEAK   : the wall-force power balance INT eta_app gd^2 dV = v_wall F_x + Pg - dKE. Uses only
-           the MEASURABLE boundary force (what a real sensor gives); carries the discrete
+  weak   : the wall-force power balance INT eta_app gd^2 dV = v_wall F_x + Pg - dKE. Uses only
+           the measurable boundary force (what a real sensor gives); carries the discrete
            closure factor (wall power ~1.4x the particle-gd dissipation) and is identifiability-
            limited.
-  STRONG : the LOCAL constitutive relation at each particle, sigma_dev:D_dev = eta_app(gd)
-           (gd^2 - eps^2), regressed pointwise from the dumped Cauchy stress. An ORACLE (needs
+  strong : the local constitutive relation at each particle, sigma_dev:D_dev = eta_app(gd)
+           (gd^2 - eps^2), regressed pointwise from the dumped Cauchy stress. An oracle (needs
            the full stress field, unavailable in a real experiment) but exact for the right
-           basis, with NO closure factor.
+           basis, with no closure factor.
 
 The comparison separates measurement/method limits (weak, force-based) from model-class limits:
 the flexible FE basis is near-exact in the strong form and rides ~1.4x high in the weak form
-(the closure factor), while the misspecified Bingham fit fails in BOTH (it cannot represent the
+(the closure factor), while the misspecified Bingham fit fails in both (it cannot represent the
 shear-thinning shape regardless of the data form). Run:
-  PYTHONPATH=src ../.venv/bin/python examples/strong_vs_weak.py
+  python experiments/strong_vs_weak.py
 """
 from __future__ import annotations
 
@@ -24,6 +24,7 @@ from pathlib import Path
 
 import numpy as np
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "examples"))
 import shear_cell_3d as M3
 import shear_cell_fe as M2
 
@@ -63,7 +64,7 @@ def run(dim="3d"):
     fe = FunctionEncoderDict(d["s_grid"], d["table"])
     Lx = M.GEOM[0] if dim == "3d" else M.COL_W
 
-    # one sweep, recording BOTH the wall-force power balance and the per-particle stress
+    # one sweep, recording both the wall-force power balance and the per-particle stress
     segs, A_fe, A_b, bvec, p50s = [], [], [], [], []
     t0 = time.time()
     for vp in SPEEDS:
@@ -83,7 +84,7 @@ def run(dim="3d"):
     G = fe.gram((10.0 ** np.linspace(-1, 2, 257), np.ones(257)))
     Icon = np.logspace(np.log10(gd_lo), np.log10(gd_hi), 40)
 
-    # ---- WEAK: wall-force power balance (no prior, data only) -----------------------
+    # ---- weak: wall-force power balance (no prior, data only) -----------------------
     A_fe = np.vstack(A_fe); A_b = np.vstack(A_b); bvec = np.concatenate(bvec)
     sc = float(np.sqrt(np.mean(bvec ** 2))) + 1e-30
     qp = constrained_solve(A_fe / sc, bvec / sc, fe, lam=1e-3, G=G, mu_min=0.5,
@@ -92,9 +93,9 @@ def run(dim="3d"):
     thb_w, *_ = np.linalg.lstsq(A_b, bvec, rcond=None)
     eta_bg_weak = thb_w[1] + thb_w[0] / np.sqrt(gg ** 2 + eps ** 2)
 
-    # ---- STRONG: local apparent viscosity eta_est = sigma_dev:D_dev/(gd^2 - eps^2),
+    # ---- strong: local apparent viscosity eta_est = sigma_dev:D_dev/(gd^2 - eps^2),
     # regressed pointwise against gd (the constitutive curve directly; volume-weighted so it
-    # is NOT dissipation-biased like the weak/force balance). Restrict to gd where gd^2-eps^2
+    # is not dissipation-biased like the weak/force balance). Restrict to gd where gd^2-eps^2
     # is well above the regularization floor so eta_est is not noise-amplified. ------------
     gd_p, vol_p, dd_p = _strong_pool(segs, gd_lo, gd_hi)
     g2 = gd_p ** 2 - eps ** 2                                    # = 2 dev(D):dev(D)

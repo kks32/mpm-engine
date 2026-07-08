@@ -1,18 +1,18 @@
 """Sequential elastic identifiability: confidence vs measurements, gated by the deformation seen.
 
 Streams the elastic gravity-drop through the convex weak-form solve frame-by-frame, accumulating
-the Fisher information  M_t = sum_{tau<=t} A_tau^T A_tau  (the same A as sim.elastic_drop.recover,
+the Fisher information  M_t = sum_{tau<=t} A_tau^T A_tau  (the same A as examples.recovery.elastic_drop.recover,
 columns = the moduli mu, lambda). At each frame it forms the posterior covariance
 Sigma = (M_t/sigma^2 + prior_prec)^{-1} and propagates it to the quantities of interest E and nu.
 
 The figure answers the questions directly:
-  - posterior std of E and nu vs frame: FLAT during free-fall (no strain -> A ~ 0 -> M does not
-    grow), then DROPS sharply at impact -> "how many measurements before confident".
-  - E (shear-dominated) crosses the confidence threshold; nu (needs VOLUMETRIC strain) stays
+  - posterior std of E and nu vs frame: flat during free-fall (no strain -> A ~ 0 -> M does not
+    grow), then drops sharply at impact -> "how many measurements before confident".
+  - E (shear-dominated) crosses the confidence threshold; nu (needs volumetric strain) stays
     starved because a bounce barely compresses -> "enough deformation to extract this property?"
     is per-property: shear yes, bulk no.
 
-Run:  .venv/bin/python -m sim.elastic_identify_sequential [sphere|box]
+Run:  python -m examples.recovery.elastic_identify_sequential [sphere|box]
 """
 from __future__ import annotations
 
@@ -110,8 +110,8 @@ def stream(dump="truth.npz", prior_E=1.2e5, prior_nu=0.30):
     th_full, *_ = np.linalg.lstsq(AA, bb, rcond=None)
     sigma2 = float(np.sum((AA @ th_full - bb) ** 2) / max(len(bb) - 2, 1))
 
-    # Bayesian / RLS init from a NOMINAL prior (in practice the FE corpus prior theta_mean/cov);
-    # before any informative frame the estimate IS the prior, then each measurement updates it.
+    # Bayesian / RLS init from a nominal prior (in practice the FE corpus prior theta_mean/cov);
+    # before any informative frame the estimate is the prior, then each measurement updates it.
     mu_p, lam_p = _E_nu_to_mulam(prior_E, prior_nu)
     prior_mean = np.array([mu_p, lam_p])
     prior_prec = np.diag([1.0 / (5 * mu_p) ** 2, 1.0 / (5 * lam_p) ** 2])   # weak prior (~500% std)
@@ -132,7 +132,7 @@ def stream(dump="truth.npz", prior_E=1.2e5, prior_nu=0.30):
             Jc = _jac(mu_h, lam_h)
             cov_qoi = Jc @ Sig @ Jc.T
             E_std = float(np.sqrt(max(cov_qoi[0, 0], 0))); nu_std = float(np.sqrt(max(cov_qoi[1, 1], 0)))
-        ev = np.linalg.eigvalsh(M)            # DATA Fisher information eigenvalues (no prior)
+        ev = np.linalg.eigvalsh(M)            # data Fisher information eigenvalues (no prior)
         rec.append((t, t * fdt, E_h, E_std, nu_h, nu_std, dev, vol, ev.min(), ev.max()))
     return np.array(rec), (mu_t, lam_t)
 
@@ -192,10 +192,10 @@ def figure(dump="truth.npz"):
 
 
 def rollout_vs_frames(dump="truth.npz", checks=(60, 95, 105, 112, 122, 140, 200, 320, 450)):
-    """The metric that matters: re-simulate the law recovered from the FIRST N frames and measure
-    how well it predicts the WHOLE trajectory (rollout error) vs N. The cheap online Fisher
-    confidence (posterior std of E) is overlaid to show it is a surrogate for the rollout error
-    -- so you can decide 'sampled enough' WITHOUT re-simulating."""
+    """The metric that matters: re-simulate the law recovered from the first N frames and measure
+    how well it predicts the whole trajectory (rollout error) vs N. The cheap online Fisher
+    confidence (posterior std of E) is overlaid to show it is a surrogate for the rollout error,
+    so you can decide 'sampled enough' without re-simulating."""
     from examples.recovery.elastic_drop import run_drop, _pos_err, TRUTH
     d = np.load(OUT / dump)
     shape = str(d["shape"]) if "shape" in d.files else "sphere"

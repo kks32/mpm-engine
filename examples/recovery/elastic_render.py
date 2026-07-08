@@ -1,14 +1,14 @@
 """Render the elastic gravity-drop bounce: truth-law vs recovered-law, surfaced + strain-coloured.
 
-Reads the npz written by sim.elastic_drop (x, v, F per frame) and renders the deforming blob as
+Reads the npz written by examples.recovery.elastic_drop (x, v, F per frame) and renders the deforming blob as
 a shaded solid on a ground plane (density-field marching cubes + Taubin smoothing, the same
 surfacing as the granular renders), coloured by the instantaneous deformation magnitude
-||F - I|| (lights up where the blob is compressed -- the stored elastic energy at impact).
+||F - I|| (lights up where the blob is compressed, the stored elastic energy at impact).
 
-  nclaw_star_bounce.mp4   -- STAR blob: truth-law | recovered-law (learned on the RECTANGLE).
-  nclaw_box_train.mp4     -- the RECTANGULAR training drop, single panel.
+  nclaw_star_bounce.mp4   star blob: truth-law | recovered-law (learned on the rectangle).
+  nclaw_box_train.mp4     the rectangular training drop, single panel.
 
-Run:  .venv/bin/python -m sim.elastic_render            # star (2-panel) + box (1-panel)
+Run:  python -m examples.recovery.elastic_render            # star (2-panel) + box (1-panel)
 """
 from __future__ import annotations
 

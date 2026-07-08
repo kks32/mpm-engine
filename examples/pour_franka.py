@@ -1,34 +1,35 @@
-"""Franka pours MPM honey from one glass into another -- the pouring counterpart of the
-viscoplastic dough-press experiments, on the same engine.
+"""Franka pours MPM honey from one glass into another, the pouring counterpart of the
+viscoplastic dough-press experiments on the same engine.
 
-The robot ACTION and the scene GEOMETRY are ported 1:1 from the Dogma95 Genesis (SPH)
-pouring study (robotic_arm_pour_genesis.py): the same Panda joint trajectory (FK is
-bit-identical between the two panda models), the same glass profile, poses, and 80%
-fill -- so the identical pour is directly comparable across the two simulators. The
-liquid is honey on warpmpm's weakly-compressible generalized-Newtonian fluid
-(eta = 10 Pa.s, rho = 1420 kg/m^3): far above the grid's numerical-viscosity floor,
-so eta is a meaningful physical parameter, and viscous enough that the stream never
-splashes -- which removes the impact-aeration artifact water-like pours show on this
-solver (splash-deposited beds the J-blind EOS freezes ~35% loose). The remaining
-volume excess is a ~1-cell loose crown, measured first-order in dx (1.060 at 128^3
--> 1.036 at 192^3), hence the 192^3 default. Both
-glasses are kinematic revolved-SDF colliders with Newton-exact wrench accumulators:
-the held glass reads the wrist-load analog, the receiving glass is a SCALE -- its Fz
-growth is the transferred weight, cross-checked against the particle count each frame.
+The robot action and the scene geometry are ported from a companion Genesis (SPH)
+pouring study: the same Panda joint trajectory (the two Panda models agree in forward
+kinematics), the same glass profile, poses, and 80% fill, so the same pour runs in
+both simulators and the results compare directly. The liquid is honey on warpmpm's
+weakly compressible generalized-Newtonian fluid (eta = 10 Pa.s, rho = 1420 kg/m^3).
+That viscosity sits far above the grid's numerical-viscosity floor, so eta is a
+meaningful physical parameter, and the stream never splashes, which avoids the
+impact-aeration artifact water-like pours show on this solver (splash-deposited beds
+that the J-blind EOS freezes about 35% loose). The remaining volume excess is a loose
+crown about one cell thick, measured first order in dx (1.060 at 128^3, 1.036 at
+192^3), hence the 192^3 default. Both glasses are kinematic revolved-SDF colliders
+with Newton-exact wrench accumulators: the held glass reads the wrist-load analog,
+and the receiving glass acts as a scale, its Fz growth giving the transferred weight,
+cross-checked against the particle count each frame.
 
-Leak control (grid BC contact band + sticky core) is audited every frame: any particle
-embedded in a glass wall is counted, projected back out, and reported; the run fails
-loudly if the audit ever grows past a fraction of the fill.
+Leak control (grid BC contact band plus sticky core) is audited every frame: any
+particle embedded in a glass wall is counted, projected back out, and reported; the
+run fails loudly if the audit ever grows past a fraction of the fill.
 
 Run:
   python examples/pour_franka.py                    # device auto-resolves (cuda:0 if present)
   python examples/pour_franka.py --fast             # coarse smoke run (96^3)
   python examples/pour_franka.py --skip-video       # metrics only
-  python examples/pour_franka.py --fast --record    # sim now, render after in a FRESH
+  python examples/pour_franka.py --fast --record    # sim now, render after in a fresh
                                                     # GL-only subprocess. Use this on
-                                                    # GH200/Vista nodes: GL and heavy CUDA
-                                                    # sharing one process fault the driver
-                                                    # (dmesg Xid 31/109); each alone is fine.
+                                                    # GH200/Vista nodes, where GL and heavy
+                                                    # CUDA sharing one process fault the
+                                                    # driver (dmesg Xid 31/109); each alone
+                                                    # is fine.
   python examples/pour_franka.py --render-only --n-grid 96   # re-render a recording
 
 Outputs (out/pour_franka/):
@@ -68,9 +69,9 @@ from warpmpm.colliders.glass import (
 
 OUT = Path(__file__).resolve().parents[1] / "out" / "pour_franka"
 
-# ---- scene constants, world frame (= Dogma95 world; the Panda base at (-0.15, 0, 0)) --
-PROFILE = GlassProfile()                                   # the Dogma95 glass
-# Receiver rests on the floor (z = height/2). Dogma95 used (0.29, -0.20); ours is shifted
+# ---- scene constants, world frame (= the Genesis study's world; the Panda base at (-0.15, 0, 0)) --
+PROFILE = GlassProfile()                                   # the Genesis study's glass
+# Receiver rests on the floor (z = height/2). the Genesis study used (0.29, -0.20); ours is shifted
 # to the MEASURED stream centroid at rim height (the MPM stream lands 5 cm further +x
 # than the SPH one; at the old spot it hit the far rim and the splash crown ejected over
 # it). Swept-source-glass clearance at this spot is 50 mm (was 19 mm).
@@ -82,14 +83,14 @@ FILL_FRACTION = 0.80
 # error is < 1%). eta = 10 Pa.s sits far above the grid's numerical-viscosity floor
 # and suppresses the impact splash that aerates water-like pours on this solver.
 HONEY = dict(eta=10.0, density=1420.0, bulk_modulus=9.0e5)
-GLASS_FRICTION = 0.05                                      # Dogma95 coup_friction
+GLASS_FRICTION = 0.05                                      # the Genesis study's coup_friction
 FPS = 60
 HOLD_SECONDS = 1.5    # keep filming after the return so the beds settle on camera
 LIQUID_RGBA = np.array([0.93, 0.66, 0.12, 1.0])
-GLASS_RGBA = (0.76, 0.92, 1.0, 0.30)                       # Dogma95 glass_surface
+GLASS_RGBA = (0.76, 0.92, 1.0, 0.30)                       # the Genesis study's glass_surface
 HANDLE_RGBA = np.array([0.06, 0.07, 0.08, 1.0])
 BACKDROP_RGBA = np.array([0.24, 0.26, 0.30, 1.0])
-# matches the Dogma95 camera side: camera at ~(0.95, -1.35, 0.62) looking at the scene
+# matches the Genesis study's camera side: camera at ~(0.95, -1.35, 0.62) looking at the scene
 # (MuJoCo azimuth/elevation give the LOOK direction: from -y+x toward the glasses)
 CAMERA = dict(lookat=(0.08, 0.0, 0.30), distance=1.5, azimuth=122.8, elevation=-13.0)
 
@@ -265,13 +266,13 @@ def settle(s: Solver, dt: float, substeps: int, seconds: float = 0.4) -> None:
 
 
 def level_volume(x_world, pos, quat, h: float) -> float:
-    """APPARENT liquid volume in a glass from its fill level (robust 97th-pct depth,
-    fillet-aware cavity volume). Compare with the count-implied volume: the ratio
-    exposes packing VOIDS the J-based EOS cannot see (sum(V0*J) itself conserves to
-    <0.1%). At water-like viscosity this exposed impact aeration -- splash-deposited
-    beds frozen ~1.3x loose -- which is why this example pours honey: the viscous
+    """Apparent liquid volume in a glass from its fill level (robust 97th-pct depth,
+    fillet-aware cavity volume). Compared with the count-implied volume, the ratio
+    exposes packing voids the J-based EOS cannot see (sum(V0*J) itself conserves to
+    <0.1%). At water-like viscosity this exposed impact aeration (splash-deposited
+    beds frozen ~1.3x loose), which is why this example pours honey: the viscous
     stream never splashes, and the residual excess is a ~1-cell loose crown that
-    converges first-order in dx (level asymptote 1.058 at 128^3 -> 1.008 at 192^3;
+    converges first order in dx (level asymptote 1.058 at 128^3, 1.008 at 192^3;
     interior particles-per-cell on final_n*.npz is the exact bed-density instrument).
     A DFSPH solver (the Genesis twin of this scene) reads 1.0 by construction.
     """

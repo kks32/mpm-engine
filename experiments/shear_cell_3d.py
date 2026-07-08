@@ -1,16 +1,16 @@
-"""3D dough wide-shear-rate cell: FE recovery + held-out ROLLOUT, with rendered visuals.
+"""3D dough wide-shear-rate cell: FE recovery + held-out rollout, with rendered visuals.
 
 The 3D squeeze excited only ~1 decade of shear rate and FE lost to Bingham there. This lifts
 the 2D wide-shear protocol (examples/shear_cell_fe.py) to a genuine 3D dough block: a free-y
-block on a sticky floor, sheared by a top wall translating in x at a SWEEP of speeds spanning
+block on a sticky floor, sheared by a top wall translating in x at a sweep of speeds spanning
 ~2 decades of gamma_dot. Same power balance INT eta_app(gd) gd^2 dV = v_wall*Fx + Pg - dKE,
-linear in theta. The recovered FE eta_app(gd) is re-simulated DIRECTLY (tabulated-viscosity
-material, fork id 12) on a HELD-OUT speed and compared to truth; the metric is the self-
+linear in theta. The recovered FE eta_app(gd) is re-simulated directly (tabulated-viscosity
+material, fork id 12) on a held-out speed and compared to truth; the metric is the self-
 consistent rollout (sim -> learn -> re-sim), not the curve. Trajectories are recorded so the
-held-out rollout can be rendered (see examples/shear_rollout_video.py).
+held-out rollout can be rendered (see experiments/shear_rollout_video.py).
 
-Run:  PYTHONPATH=src ../.venv/bin/python examples/shear_cell_3d.py          # full sweep + rollout
-      PYTHONPATH=src ../.venv/bin/python examples/shear_cell_3d.py probe    # one segment probe
+Run:  python experiments/shear_cell_3d.py          # full sweep + rollout
+      python experiments/shear_cell_3d.py probe    # one segment probe
 """
 from __future__ import annotations
 
@@ -21,7 +21,8 @@ from pathlib import Path
 
 import numpy as np
 
-# reuse the validated 2D helpers (same dir on sys.path when run as a script)
+# reuse the validated 2D helpers from the shear-cell demo in examples/
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "examples"))
 from shear_cell_fe import EPS, RHO, TRUTH, _gd, _power_rows, eta_app_true, viscous_prior
 from warpmpm import GridConfig, Solver, newtonian, tabulated_viscous
 from warpmpm.coupling.backend import WarpMPMBackend
@@ -56,7 +57,7 @@ def shear_segment(v_shear, material, n_frames, dt=1.0e-4, substeps=20,
                   record_stress=False, device="auto"):
     """One 3D shear segment. record_power -> per-frame (diss rows); record_traj -> store
     x[F,N,3], v[F,N,3], times, Fx[F] for rendering; record_stress -> per-frame per-particle
-    (gd, vol, sigma_dev:D_dev) for the STRONG-form (pointwise constitutive) recovery."""
+    (gd, vol, sigma_dev:D_dev) for the strong-form (pointwise constitutive) recovery."""
     grid = GridConfig(n_grid=N_GRID, grid_lim=GRID_LIM)
     pos, vol0, floor, cx, cy = _build_block(grid)
     _Lx, Ly, Lz = GEOM
@@ -193,7 +194,7 @@ def run(speeds=(0.006, 0.012, 0.025, 0.05, 0.1, 0.2, 0.4, 0.8), v_holdout=0.16,
     print(f"    FE, no prior  (K=8)      relL2={r_fe0*100:5.1f}%")
     print(f"    FE + family prior (K=8)  relL2={r_fe*100:5.1f}%")
 
-    # ---- held-out 3D ROLLOUT (record trajectories for rendering) -----------------------
+    # ---- held-out 3D rollout (record trajectories for rendering) -----------------------
     s_tab = np.linspace(-1.0, 2.0, 128)
     gd_tab = 10.0 ** s_tab
     tab_fe0 = np.clip(fe.phi(gd_tab) @ theta_fe0, 0.5, None)

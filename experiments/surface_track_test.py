@@ -1,14 +1,14 @@
-"""Does CoTracker work on a continuous dough SURFACE? Smooth vs material-textured.
+"""Does CoTracker work on a continuous dough surface? Smooth vs material-textured.
 
 A smooth reconstructed surface is nearly featureless -> point tracking fails (aperture
 problem; shading follows geometry/light, not material; the mesh re-triangulates each frame).
-The fix: paint the particles' MATERIAL-LOCKED speckle onto the surface (colour each surface
+The fix: paint the particles' material-locked speckle onto the surface (colour each surface
 vertex by its nearest particle's fixed brightness) -> a continuous, realistic dough that
 still carries a material-attached texture CoTracker can follow.
 
 We render the same squeeze both ways, run CoTracker3 on each, and compare tracking quality
 (CoTracker visibility/confidence + how many points stay confidently tracked). Run:
-  ../.venv/bin/python examples/surface_track_test.py
+  python experiments/surface_track_test.py
 """
 from __future__ import annotations
 

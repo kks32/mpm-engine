@@ -5,7 +5,7 @@ the target dough (left) and the achieved dough + gripper (right).
 
 Run:
   python examples/gripper_shape.py plan --device cuda:0
-  python examples/gripper_render_dough.py plan --device cuda:0
+  python experiments/gripper_render_dough.py plan --device cuda:0
 """
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # make `examples` importable when run as a script
-from examples.gripper_shape import GripperShapeScene, ID_LAW, TRUE, OUT  # noqa: E402
+from examples.gripper_shape import GripperShapeScene, ID_LAW, TRUE, OUT
 
 
 def _poly(pts, h, sigma=1.3, iso_frac=0.30):
@@ -62,7 +62,7 @@ def _box(center, half):
 def _plates_and_slab(boxes, dough_pts, floor, clear=0.004, th=0.006):
     """From the two finger colliders + the dough, return (slab_bounds, [plate1, plate2]) where the
     slab is the inter-plate region the dough is clipped to (so no dough sits in front of a plate),
-    and each plate is a WALL drawn a few mm OUTSIDE the dough, spanning past it in perp + z."""
+    and each plate is a wall drawn a few mm outside the dough, spanning past it in perp + z."""
     c0, _ = boxes[0]; c1, _ = boxes[1]
     ax = int(np.argmax(np.abs(np.array(c0) - np.array(c1))))     # pinch (close) axis: 0=x or 1=y
     pa = 1 - ax                                                   # in-plane perpendicular axis
@@ -81,8 +81,8 @@ def _plates_and_slab(boxes, dough_pts, floor, clear=0.004, th=0.006):
 
 
 def _dough_and_fingers(pts, dx, boxes, floor):
-    """Surface the dough and return (mesh, drawn_fingers). FULL-WIDTH plates: clip the dough to the
-    inter-plate slab + draw wall plates. LOCALIZED fingers (small perp, for carving a T): carve each
+    """Surface the dough and return (mesh, drawn_fingers). Full-width plates: clip the dough to the
+    inter-plate slab + draw wall plates. Localized fingers (small perp, for carving a T): carve each
     finger box out + draw the actual small finger offset outward (a slab clip would delete the bar)."""
     d = _poly(pts, dx, iso_frac=0.45)
     if not boxes:

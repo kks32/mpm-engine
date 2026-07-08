@@ -1,19 +1,19 @@
 """Plasticine (von-Mises elastoplastic) gravity-drop: recover (G, lambda, yield) without backprop.
 
-Completes the UniPhy material taxonomy (elastic / Newtonian / non-Newtonian / sand / PLASTIC).
-A ductile von-Mises blob (warp-mpm material 1) is dropped hard enough to YIELD and plastically
+Completes the UniPhy material taxonomy (elastic / Newtonian / non-Newtonian / sand / plastic).
+A ductile von-Mises blob (warp-mpm material 1) is dropped hard enough to yield and plastically
 flatten (it does not bounce back like the elastic blob). We recover:
-  - (G, lambda) from the DYNAMIC weak-form momentum balance: the Hencky Cauchy stress
+  - (G, lambda) from the dynamic weak-form momentum balance: the Hencky Cauchy stress
         sigma = (1/J) U diag(2 G eps_i + lambda sum eps) U^T,   eps_i = log(sing(F)),
-    is LINEAR in (G, lambda) -> same convex solve as sim.elastic_drop (no backprop, inertia
-    sets the absolute scale).
-  - yield stress from the SATURATION of deviatoric strain: the return map caps ||dev(eps)|| at
+    is linear in (G, lambda) -> the same convex solve as examples.recovery.elastic_drop
+    (no backprop, inertia sets the absolute scale).
+  - yield stress from the saturation of deviatoric strain: the return map caps ||dev(eps)|| at
     eps_y = yield/(2G) in yielded regions, so yield = 2 G * (saturated ||dev(eps)||).
 
-The plastic-vs-elastic GATE: yield is identifiable ONLY if some material has yielded (a clear
+The plastic-vs-elastic gate: yield is identifiable only if some material has yielded (a clear
 ||dev(eps)|| plateau). A sub-yield (soft) loading gives only a lower bound -> refuse.
 
-Run:  .venv/bin/python -m sim.plastic_drop            # hard drop: yields, recover (G,lam,yield)
+Run:  python -m examples.recovery.plastic_drop            # hard drop: yields, recover (G,lam,yield)
 """
 from __future__ import annotations
 
@@ -111,7 +111,7 @@ def recover(dump_path, log=print):
     (G, lambda): the dynamic momentum balance sum_p V0 S_k(F):grad_X w = -sum_p V0 rho0 (a-g).w,
     with S_G, S_L the Hencky Cauchy-stress basis (linear in G, lambda). Yield: the return map caps
     ||dev(eps)|| at eps_y = yield/(2G) in yielded regions, so yield = 2 G * (saturated ||dev(eps)||).
-    The PLASTIC GATE: yield is identifiable only if a clear ||dev(eps)|| plateau exists (material
+    The plastic gate: yield is identifiable only if a clear ||dev(eps)|| plateau exists (material
     yielded); otherwise only a lower bound -> refuse."""
     d = np.load(dump_path)
     X = d["x"].astype(np.float64); v = d["v"].astype(np.float64)
@@ -130,11 +130,12 @@ def recover(dump_path, log=print):
     phis = [W * m for m in modes]; gphis = [gW * m[:, None] + W[:, None] * gm for m, gm in zip(modes, gmodes)]
     rows_A, rows_b, devacc = [], [], []
     for t in range(1, T - 1):
-        # rotation-INVARIANT validity filter: the Hencky strain ||log(sig)|| (sig = singular values
-        # of F) instead of ||F - I||. The latter is not frame-objective -- a material element that has
-        # rotated (||F-I|| large) but barely strained is valid, and the SVD branch used to STORE F
-        # (warp svd3 vs numpy) can differ by a benign rotation that leaves the stress identical. The
-        # Hencky measure passes exactly the same physical elements regardless of that storage choice.
+        # rotation-invariant validity filter: the Hencky strain ||log(sig)|| (sig = singular
+        # values of F) instead of ||F - I||. The latter is not frame-objective: a material
+        # element that has rotated (||F-I|| large) but barely strained is valid, and the SVD
+        # branch used to store F (warp svd3 vs numpy) can differ by a benign rotation that
+        # leaves the stress identical. The Hencky measure passes exactly the same physical
+        # elements regardless of that storage choice.
         Ft = F[t]
         sig_t = np.clip(np.linalg.svd(Ft, compute_uv=False), 1e-9, None)   # (N,3)
         Jt = sig_t.prod(-1); hencky = np.linalg.norm(np.log(sig_t), axis=1)
@@ -171,9 +172,9 @@ def recover(dump_path, log=print):
 
 
 def gate():
-    """The plasticine identifiability GATE: SAME drop, two yield stresses. The low-yield blob
-    YIELDS -> (G, lambda, yield) all recovered. The high-yield blob stays elastic under the same
-    loading -> (G, lambda) recovered but yield REFUSED (only a lower bound). This is the
+    """The plasticine identifiability gate: same drop, two yield stresses. The low-yield blob
+    yields -> (G, lambda, yield) all recovered. The high-yield blob stays elastic under the same
+    loading -> (G, lambda) recovered but yield refused (only a lower bound). This is the
     plastic-vs-elastic coverage bound: yield is identifiable only once the material yields."""
     OUT.mkdir(parents=True, exist_ok=True)
     E, nu, rho, yld = TRUTH["E"], TRUTH["nu"], TRUTH["rho"], 2.0e4   # same material, eps_y~2.6%

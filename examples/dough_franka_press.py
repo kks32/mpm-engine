@@ -1,28 +1,27 @@
-"""Two-way (force-feedback) Franka press: the dough STOPS the arm.
+"""Two-way force-feedback Franka press.
 
-The end-effector is force-regulated, not scripted: a first-order admittance descends the
-gripper until the dough's measured reaction reaches a target force, then holds. The stopping
-depth is decided by the material, so the arm halts on the dough instead of driving through to
-the floor. The loop is:
+A first-order admittance law regulates the end effector: the gripper descends until the
+dough's measured reaction reaches a target force, then holds. The stopping depth is
+decided by the material, which is what keeps the arm from driving through to the floor.
+Each control tick reads the reaction wrench, picks a descent velocity from the admittance
+law, drives the MPM tool for one tick of substeps, and reads the new reaction. The MuJoCo
+Franka is posed by inverting its end-effector kinematics so the gripper tip tracks the
+tool in one shared metric frame. Renders a composite view with a live force and depth
+readout, and returns metrics (penetration, force balance, halt) for headless sweeps and
+tests.
 
-    read reaction wrench  ->  admittance picks descent velocity  ->  drive MPM tool (one
-    control tick of substeps)  ->  read new reaction  ->  repeat,
-
-with the MuJoCo Franka posed by inverting its EE kinematics so the gripper tip tracks the
-tool (one shared metric frame). Renders the composite single view with a live force/depth
-HUD; returns metrics (penetration, force balance, halt) for headless sweeps/tests.
-
-Run:  ../.venv/bin/python examples/dough_franka_press.py
+Run:  python examples/dough_franka_press.py
 """
 from __future__ import annotations
 
-import argparse
-import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
 import numpy as np
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from common import device_cli, franka_descent_map, write_mp4
 from warpmpm import GridConfig, Solver, block, newtonian
 from warpmpm.coupling.admittance import ForceAdmittance
 from warpmpm.coupling.backend import WarpMPMBackend
@@ -54,29 +53,14 @@ def run(n_grid=48, ticks=130, substeps=24, dt=2.0e-5, f_target=40.0, v_max=0.45,
     tool = backend.attach_tool((cx, cy, z), box_half, velocity=(0, 0, 0))
 
     # --- robot pose by EE-kinematics inversion (only if rendering) -------------------
-    arm = a_grid = ee_z = None
-    ex0 = ey0 = z_off = 0.0
+    arm = None
     if render:
         from warpmpm.adapters.mujoco_adapter import FrankaArm
         arm = FrankaArm(height=600, width=800)
-        a_grid = np.linspace(0.0, 1.0, 80)
-        ee = np.array([arm.set_descent(float(a), dt_ctrl)["pos"] for a in a_grid])
-        arm._prev_ee = None
-        ee_z = ee[:, 2]
-        ex0, ey0 = float(ee[len(ee) // 2, 0]), float(ee[len(ee) // 2, 1])
-        z_off = float(np.interp(0.30, a_grid, ee_z)) - (z + box_half[2])  # const MPM->world z
+        rig = franka_descent_map(arm, dt_ctrl, cx, cy, z + box_half[2], a_ref=0.30)
+        a_of, to_world = rig.a_of, rig.to_world
+        ex0, ey0, z_off = rig.ex0, rig.ey0, rig.z_off
 
-    def a_of(box_top_mpm: float) -> float:
-        return float(np.interp(box_top_mpm + z_off, ee_z[::-1], a_grid[::-1]))
-
-    def to_world(p):
-        out = np.empty_like(p)
-        out[:, 0] = ex0 - cx + p[:, 0]
-        out[:, 1] = ey0 - cy + p[:, 1]
-        out[:, 2] = p[:, 2] + z_off
-        return out
-
-    if render:
         import matplotlib
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
@@ -153,21 +137,11 @@ def run(n_grid=48, ticks=130, substeps=24, dt=2.0e-5, f_target=40.0, v_max=0.45,
         "n_contact_final": int(log[-1][4]), "ticks": ticks, "device": device, "mp4": None,
     }
     if render and arm is not None:
-        OUT.mkdir(exist_ok=True)
-        mp4 = OUT / out_name
-        subprocess.run(["ffmpeg", "-y", "-framerate", "16", "-i", str(tmp / "f_%04d.png"),
-                        "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "20",
-                        "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2", str(mp4)],
-                       check=True, capture_output=True)
-        metrics["mp4"] = str(mp4)
-        print("wrote", mp4)
+        metrics["mp4"] = str(write_mp4(tmp, OUT / out_name, fps=16))
     return metrics
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--device", default="auto", help="Warp device: auto (cuda if available), cuda:N, or cpu")
-    parser.add_argument("--no-render", action="store_true", help="skip video rendering")
-    args = parser.parse_args()
+    args = device_cli(no_render=True).parse_args()
     m = run(device=args.device, render=not args.no_render)
     print("\nmetrics:", {k: (round(v, 3) if isinstance(v, float) else v) for k, v in m.items()})

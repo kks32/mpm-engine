@@ -1,17 +1,17 @@
-"""#74 -- cross-instance transfer: identify the law on ONE object, plan a shaping task on a
-DIFFERENT (held-out) object. The convex-identified (G, yield) is a MATERIAL property, so it is
+"""Cross-instance transfer: identify the law on one object, plan a shaping task on a
+different (held-out) object. The convex-identified (G, yield) is a material property, so it is
 size-independent and transfers for free; a per-object GNN (RoboCraft/RoboCook) is trained on one
 instance and does not transfer across object volume. This is the axis where the physical model
 structurally wins.
 
 Protocol:
-  1. Identify (G, yield) from a force squeeze on a SMALL block A and (separately) a LARGE block B
-     -- show the recovered yield matches across sizes (size-independence = the transfer property).
-  2. On the LARGE block B, define a target shape (B pressed by a reference action with TRUE params).
+  1. Identify (G, yield) from a force squeeze on a small block A and (separately) a large block
+     B; show the recovered yield matches across sizes (size-independence = the transfer property).
+  2. On the large block B, define a target shape (B pressed by a reference action, true params).
   3. Plan the press on B through the A-identified law and through the B-true law (oracle); execute
      both in the B-true engine. Transfer is successful if the A-law plan reaches ~the oracle Chamfer.
 
-Run:  ../.venv/bin/python examples/transfer_identify_plan.py
+Run:  python experiments/transfer_identify_plan.py
 """
 from __future__ import annotations
 
@@ -21,10 +21,10 @@ from pathlib import Path
 
 import numpy as np
 
-import sys  # noqa: E402
+import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # make `examples` importable when run as a script
-from examples.vonmises_identify import probe, identify  # noqa: E402
-from examples.shape_planning import PlateShapeScene, cem_plan, chamfer  # noqa: E402
+from examples.vonmises_identify import probe, identify
+from experiments.shape_planning import PlateShapeScene, cem_plan, chamfer
 
 OUT = Path(__file__).resolve().parents[1] / "out" / "transfer_identify_plan"
 NU = 0.30
@@ -50,7 +50,7 @@ def run(A=(0.09, 0.06, 0.045), B=(0.12, 0.08, 0.06), a_ref=(0.30, 0.18),
     print(f"  -> yield A vs B differ by {100*abs(idA['yield_hat']/idB['yield_hat']-1):.1f}% "
           f"(material property, size-independent)", flush=True)
 
-    # 2. target on the LARGE block B, generated with the TRUE law
+    # 2. target on the large block B, generated with the true law
     sc = PlateShapeScene(n_grid=32, ppc=2, size=B, n_seg=2, n_frames=80, sub=4,
                          device=device)
     a_ref = np.asarray(a_ref)
@@ -65,7 +65,7 @@ def run(A=(0.09, 0.06, 0.045), B=(0.12, 0.08, 0.06), a_ref=(0.30, 0.18),
                      ("true (oracle)", TRUE)]:
         a, _, _ = cem_plan(sc, target, [0, 0], [0.5, 0.5], params=law,
                            pop=16, elite=4, n_iter=4, seed=2, verbose=False)
-        x = sc.simulate(a, params=TRUE)                       # always execute in the TRUE engine
+        x = sc.simulate(a, params=TRUE)                       # always execute in the true engine
         cd = chamfer(x[sc.match_idx], target[sc.match_idx]) * 1000
         res[tag] = dict(plan=[float(z) for z in a], executed_chamfer_mm=float(cd))
         print(f"  plan via {tag:24s}: executed Chamfer = {cd:.3f} mm", flush=True)

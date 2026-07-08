@@ -1,21 +1,21 @@
-"""Hyperelastic gravity-drop: learn the elastic stiffness from a bounce, NO backpropagation.
+"""Hyperelastic gravity-drop: learn the elastic stiffness from a bounce, no backpropagation.
 
 NCLaw learns an elastic law by differentiating an MPM rollout (BPTT on positions). We do the
 elastic analogue of our granular weak-form recovery: drop a fixed-corotated (neo-Hookean-style)
 blob, observe its bounce (positions, velocities, the deformation gradient F per particle per
-frame), and recover the elastic moduli (mu, lambda) -- the stiffness -- by a CONVEX,
+frame), and recover the elastic moduli (mu, lambda), the stiffness, by a convex,
 linear-in-theta weak-form momentum-residual solve. The simulator is never differentiated.
 
 Key idea (docs: the elastic case of the weak form):
-  the first Piola-Kirchhoff stress of the FCR model is LINEAR in the moduli,
+  the first Piola-Kirchhoff stress of the FCR model is linear in the moduli,
       P = mu * [2 (F - R)] + lambda * [J (J-1) F^{-T}]  ==  mu P_mu(F) + lambda P_lambda(F),
-  with R the rotation from polar(F). Plugged into the DYNAMIC weak form (reference config),
+  with R the rotation from polar(F). Plugged into the dynamic weak form (reference config),
       sum_p V0_p P : grad_X w_j  =  - sum_p V0_p rho0 (a_p - g) . w_j     (interior bumps),
-  the inertia term rho0*a (known from the observed trajectory) supplies the ABSOLUTE force
-  scale, so the moduli are pinned without any force sensor -- the bounce IS the load cell.
+  the inertia term rho0*a (known from the observed trajectory) supplies the absolute force
+  scale, so the moduli are pinned without any force sensor; the bounce is the load cell.
   Two unknowns, many (test function x frame) rows -> over-determined convex least squares.
 
-Run:  .venv/bin/python -m sim.elastic_drop            # truth drop -> recover -> re-sim -> compare
+Run:  python -m examples.recovery.elastic_drop            # truth drop -> recover -> re-sim -> compare
 """
 from __future__ import annotations
 
@@ -39,7 +39,7 @@ TRUTH = dict(E=2.0e5, nu=0.30, rho=1000.0)
 def _raw_points(shape, size, h):
     """Particle cloud for a shape, centred near the origin (placed later). `size` is the
     characteristic half-extent. Shapes: sphere, box (rectangular blob), star (5-point star in
-    the x-z plane, extruded thin in y -- a qualitatively different, non-convex geometry)."""
+    the x-z plane, extruded thin in y; a qualitatively different, non-convex geometry)."""
     g = np.arange(-size - h, size + h, h)
     P = np.stack(np.meshgrid(g, g, g, indexing="ij"), -1).reshape(-1, 3).astype(np.float64)
     if shape == "sphere":
@@ -145,7 +145,7 @@ def recover(dump_path, n_modes=4, log=print):
     """Convex weak-form recovery of the elastic moduli (mu, lambda) from the bounce.
 
     P(F) = mu * 2(F-R) + lambda * J(J-1) F^{-T}  is linear in (mu, lambda). Per frame the
-    DYNAMIC momentum balance  sum_p V0 P:grad_X w_j = - sum_p V0 rho0 (a_p - g).w_j  gives two
+    dynamic momentum balance  sum_p V0 P:grad_X w_j = - sum_p V0 rho0 (a_p - g).w_j  gives two
     columns and one row per (test function, frame); we stack and least-squares for (mu, lambda).
     Interior reference bumps (zero on the surface) make boundary tractions vanish; the inertia
     term sets the absolute scale. No simulator differentiation.
@@ -182,8 +182,9 @@ def recover(dump_path, n_modes=4, log=print):
     cov = []
     for ti, t in enumerate(Frng):
         Ft = F[t]
-        # rotation-INVARIANT validity filter: Hencky strain ||log(sig)|| not ||F - I|| (frame-objective;
-        # robust to the benign SVD-branch rotation that can differ between MPM backends when storing F).
+        # rotation-invariant validity filter: Hencky strain ||log(sig)|| not ||F - I||
+        # (frame-objective; robust to the benign SVD-branch rotation that can differ
+        # between MPM backends when storing F).
         sig_t = np.clip(np.linalg.svd(Ft, compute_uv=False), 1e-9, None)
         J = sig_t.prod(-1); devF = np.linalg.norm(np.log(sig_t), axis=1)
         m = (J > 0.3) & (J < 2.0) & (devF < 0.8) & np.isfinite(J)   # drop pathological surface pts
@@ -231,8 +232,8 @@ def _pos_err(tp, rp):
 
 
 def shape_generalization():
-    """Learn the elastic law on a RECTANGULAR blob drop, then PREDICT a STAR neo-Hookean blob
-    (held-out, qualitatively different geometry) -- the elastic analogue of the sand
+    """Learn the elastic law on a rectangular blob drop, then predict a star neo-Hookean blob
+    (held-out, qualitatively different geometry), the elastic analogue of the sand
     bunny/dragon generalization. No backprop; recovery is a convex solve."""
     OUT.mkdir(parents=True, exist_ok=True)
     E, nu, rho = TRUTH["E"], TRUTH["nu"], TRUTH["rho"]
@@ -242,7 +243,7 @@ def shape_generalization():
     run_drop(E, nu, rho, box, shape="box", size=0.16, drop_gap=0.18)
     rec = recover(box)
 
-    # 2) predict the star: truth-law vs recovered-law re-sim on the SAME star cloud (1:1 particles)
+    # 2) predict the star: truth-law vs recovered-law re-sim on the same star cloud (1:1 particles)
     star_t = run_drop(E, nu, rho, OUT / "star_truth.npz", shape="star", size=0.17)
     star_p = run_drop(rec["E"], rec["nu"], rho, OUT / "star_pred.npz", shape="star", size=0.17)
     rmse_mm, mse_box, nf = _pos_err(star_t, star_p)
@@ -255,19 +256,19 @@ def shape_generalization():
 
 
 def report_errors():
-    """Elastic RECONSTRUCTION vs GENERALIZATION position error (NCLaw metric family).
-    Reconstruction = re-sim the recovered law on the TRAINING geometry (the rectangle);
-    generalization = the held-out STAR. Mirrors the sand Table 5 rows."""
+    """Elastic reconstruction vs generalization position error (NCLaw metric family).
+    Reconstruction = re-sim the recovered law on the training geometry (the rectangle);
+    generalization = the held-out star. Mirrors the sand Table 5 rows."""
     OUT.mkdir(parents=True, exist_ok=True)
     E, nu, rho = TRUTH["E"], TRUTH["nu"], TRUTH["rho"]
     box = OUT / "box_truth.npz"
     if not box.exists():
         run_drop(E, nu, rho, box, shape="box", size=0.16, drop_gap=0.18)
     rec = recover(box)
-    # RECONSTRUCTION: re-sim the rectangle with the recovered moduli (same geometry, 1:1 particles)
+    # reconstruction: re-sim the rectangle with the recovered moduli (same geometry, 1:1 particles)
     boxp = run_drop(rec["E"], rec["nu"], rho, OUT / "box_pred.npz", shape="box", size=0.16, drop_gap=0.18)
     rec_rmse, rec_mse, _ = _pos_err(box, boxp)
-    # GENERALIZATION: held-out star (reuse if present)
+    # generalization: held-out star (reuse if present)
     st, sp = OUT / "star_truth.npz", OUT / "star_pred.npz"
     if not (st.exists() and sp.exists()):
         run_drop(E, nu, rho, st, shape="star", size=0.17)

@@ -1,22 +1,23 @@
 """Wrist force-torque sensor reads back the MPM contact force (Newton's third law).
 
-The dough's reaction on the plate is the EXACT MPM grid impulse (the simulation's load
-cell at the contact). Here we feed that reaction to a DYNAMIC Franka in MuJoCo as an
-external force on the hand, hold the arm with its position actuators, and read a wrist
-force-torque sensor -- the load cell a real robot actually has. The wrist reading equals
-the MPM reaction (the loop conserves force), which is the whole point: "the force from
-MuJoCo" and "the exact MPM impulse" are the SAME number, measured at the wrist versus at
-the contact. This validates the two-way readout end to end.
+The dough's reaction on the plate is the exact MPM grid impulse, the simulation's load
+cell at the contact. That reaction is fed to a dynamic Franka in MuJoCo as an external
+force on the hand; the arm holds pose with its position actuators, and a wrist
+force-torque sensor, the load cell a real robot actually carries, is read back. The
+wrist reading equals the MPM reaction because the loop conserves force: one number,
+measured at the wrist and at the contact. This validates the two-way readout end to end.
 
-Run:  ../.venv/bin/python examples/wrist_ft_franka.py
+Run:  python examples/wrist_ft_franka.py
 """
 from __future__ import annotations
 
-import argparse
+import sys
 from pathlib import Path
 
 import numpy as np
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from common import device_cli
 from warpmpm import GridConfig, Solver, block, newtonian
 from warpmpm.adapters.mujoco_adapter import FrankaArm
 from warpmpm.coupling.backend import WarpMPMBackend
@@ -89,7 +90,5 @@ def run(n_grid=44, frames=70, substeps=20, dt=1.0e-4, v_plate=0.08, settle=220,
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--device", default="auto", help="Warp device: auto (cuda if available), cuda:N, or cpu")
-    args = parser.parse_args()
+    args = device_cli().parse_args()
     run(device=args.device)

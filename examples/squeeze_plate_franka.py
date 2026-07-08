@@ -1,48 +1,39 @@
 """Arm-mounted plate squeeze: cross-validate the 2D squeeze-flow rheology in 3D.
 
-We reproduce the validated quasi-2D plate squeeze (sim/squeeze_scene.py +
-perception/squeeze_force_identify.py) but now the flat plate is MOUNTED ON THE FRANKA and
-presses a full 3D dough blob. The material is identical (newtonian eta=40 Pa.s, tau_y=200 Pa,
-rho=1000, bulk=9e5) and the plate descends at the same constant v_plate=0.08 m/s. We run the
-SAME identification -- the mechanical power balance
+The validated quasi-2D plate squeeze is reproduced with the flat plate mounted on the
+Franka, pressing a full 3D dough blob. The material and the plate speed match the 2D
+test (newtonian eta=40 Pa.s, tau_y=200 Pa, rho=1000, bulk=9e5, v_plate=0.08 m/s), and
+so does the identification, the mechanical power balance
 
     INT tau:D dV = P_plate + P_gravity - dKE/dt ,
     INT tau:D dV = tau_y INT|gd| dV + eta INT|gd|^2 dV   (pressure does no work),
 
-so regressing the measured dissipation (from the plate reaction force, gravity power, and the
-kinetic-energy rate) against (INT|gd|, INT|gd|^2) over the squeeze recovers (tau_y, eta) from
-the boundary force alone. We then compare the recovered law to ground truth and to the 2D
-result. |gd| = sqrt(2 dev(D):dev(D) + eps^2), D = sym(L), eps = 0.05 (matching the kernel).
+so regressing the measured dissipation (plate reaction force, gravity power, and the
+kinetic-energy rate) against (INT|gd|, INT|gd|^2) over the squeeze recovers (tau_y, eta)
+from the boundary force alone. The recovered law is compared to ground truth and to the
+2D result. |gd| = sqrt(2 dev(D):dev(D) + eps^2), D = sym(L), eps = 0.05 (the kernel's).
 
-Run:  ../.venv/bin/python examples/squeeze_plate_franka.py
+Run:  python examples/squeeze_plate_franka.py
 """
 from __future__ import annotations
 
 import json
-import subprocess
+import sys
 import tempfile
-import argparse
 from pathlib import Path
 
 import numpy as np
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from common import device_cli, equivalent_shear_rate, franka_descent_map, write_mp4
 from warpmpm import GridConfig, Solver, block, newtonian
 from warpmpm.coupling.backend import WarpMPMBackend
 
 OUT = Path(__file__).resolve().parents[1] / "out"
 G_MAG = 9.81
 EPS_GAMMA = 0.05   # match the warp-mpm kernel's shear-rate regularization
-# the validated 2D quasi-plane-strain result (perception/squeeze_force.json), for reference
+# the validated 2D quasi-plane-strain squeeze result, for reference
 REF_2D = {"tau_y_hat": 272.0, "eta_hat": 50.3, "tau_y_true": 200.0, "eta_true": 40.0}
-
-
-def equivalent_shear_rate(L: np.ndarray) -> np.ndarray:
-    """|gd|_eps = sqrt(2 dev(D):dev(D) + eps^2), D = sym(L); matches the kernel exactly."""
-    D = 0.5 * (L + np.transpose(L, (0, 2, 1)))
-    tr = (D[..., 0, 0] + D[..., 1, 1] + D[..., 2, 2]) / 3.0
-    Dd = D - tr[..., None, None] * np.eye(3)
-    dd = np.einsum("...ij,...ij->...", Dd, Dd)
-    return np.sqrt(2.0 * dd + EPS_GAMMA * EPS_GAMMA)
 
 
 def power_balance_identify(rec: dict, v_plate: float, frame_dt: float,
@@ -52,11 +43,11 @@ def power_balance_identify(rec: dict, v_plate: float, frame_dt: float,
 
     The 2D test assumes incompressibility (INT p div v = 0). The MPM dough is weakly
     compressible, so with correct_eos=True we add back the volumetric work term
-    INT p div(v) dV. IMPORTANT: that p is the ORACLE Cauchy-trace pressure (s.cauchy()),
-    so correct_eos is an ORACLE-STRESS correction, NOT an EOS-from-kinematics one -- a
-    real load-cell/video pipeline does not have it unless pressure or density is separately
-    observed or inferred. It is reported here as the upper bound on what removing the EOS
-    bias buys; the deployable number is the correct_eos=False column."""
+    INT p div(v) dV. That p is the oracle Cauchy-trace pressure (s.cauchy()), which a
+    real load-cell and video pipeline does not have unless pressure or density is
+    separately observed or inferred. The corrected column is therefore the upper bound
+    on what removing the EOS bias buys; the deployable number is the
+    correct_eos=False column."""
     times = np.asarray(rec["t"]); Fp = np.asarray(rec["F_plate"])
     Pg = np.asarray(rec["P_grav"]); KE = np.asarray(rec["KE"])
     X1 = np.asarray(rec["X1"]); X2 = np.asarray(rec["X2"]); Pvol = np.asarray(rec["Pvol"])
@@ -106,8 +97,7 @@ def run(n_grid=48, v_plate=0.08, eta=40.0, tau_y=200.0, density=1000.0, bulk=9.0
     n_frames = round(t_press / frame_dt)
 
     # --- render setup (EE inversion so the gripper tip tracks the plate top) ----------
-    arm = a_grid = ee_z = None
-    ex0 = ey0 = z_off = 0.0
+    arm = None
     if render:
         import matplotlib
 
@@ -116,27 +106,15 @@ def run(n_grid=48, v_plate=0.08, eta=40.0, tau_y=200.0, density=1000.0, bulk=9.0
         import matplotlib.pyplot as plt
         from matplotlib import colormaps
         arm = FrankaArm(height=620, width=820)
-        a_grid = np.linspace(0.0, 1.0, 80)
-        ee = np.array([arm.set_descent(float(a), frame_dt)["pos"] for a in a_grid])
-        arm._prev_ee = None
-        ee_z = ee[:, 2]
-        ex0, ey0 = float(ee[len(ee) // 2, 0]), float(ee[len(ee) // 2, 1])
-        z_off = float(np.interp(0.28, a_grid, ee_z)) - (z + plate_hz)
+        rig = franka_descent_map(arm, frame_dt, cx, cy, z + plate_hz, a_ref=0.28)
+        a_of, to_world = rig.a_of, rig.to_world
+        ex0, ey0, z_off = rig.ex0, rig.ey0, rig.z_off
         table_z = floor + z_off
         arm.cam.lookat[:] = [ex0, ey0, table_z + 0.04]
         arm.cam.distance = 0.8
         arm.cam.azimuth = 138
         arm.cam.elevation = -14
         tmp = Path(tempfile.mkdtemp())
-
-        def a_of(box_top_mpm):
-            return float(np.interp(box_top_mpm + z_off, ee_z[::-1], a_grid[::-1]))
-
-        def to_world(p):
-            out = np.empty_like(p)
-            out[:, 0] = ex0 - cx + p[:, 0]; out[:, 1] = ey0 - cy + p[:, 1]
-            out[:, 2] = p[:, 2] + z_off
-            return out
 
     rec = {k: [] for k in ("t", "F_plate", "F_stress", "P_grav", "KE", "X1", "X2", "Pvol",
                            "strain", "gap_mm")}
@@ -152,10 +130,10 @@ def run(n_grid=48, v_plate=0.08, eta=40.0, tau_y=200.0, density=1000.0, bulk=9.0
         z = z_new; prev_z = z_new
         # per-frame scalars for the power-balance identification
         x = s.x(); v = s.v(); L = s.L(); cau = s.cauchy(); vol = s.vol()
-        # PRIMARY plate reaction = the Newton-EXACT grid impulse the collider imposes:
-        # F = sum_substeps sum_nodes m*(v_free - v_imposed) / frame_dt. No contact band, no
-        # T_layer, no gating -- the calibrated force (this is what MuJoCo's wrist sensor would
-        # read back). +Fz in compression, so P_plate = +v_plate*F_react.
+        # Primary plate reaction: the Newton-exact grid impulse the collider imposes,
+        # F = sum_substeps sum_nodes m*(v_free - v_imposed) / frame_dt, with no contact
+        # band, thickness layer, or gating. This is the force MuJoCo's wrist sensor
+        # reads back. +Fz in compression, so P_plate = +v_plate*F_react.
         F_react = float(backend.get_tool_reaction(tool, frame_dt)[2]) if f > 0 else 0.0
         # diagnostic: the stress-integral surface-band estimator (the 2D method) for comparison
         m_xy = (np.abs(x[:, 0] - cx) < plate_hx) & (np.abs(x[:, 1] - cy) < plate_hy)
@@ -165,14 +143,14 @@ def run(n_grid=48, v_plate=0.08, eta=40.0, tau_y=200.0, density=1000.0, bulk=9.0
         F_stress = float(-np.sum(szz[band] * vol[band]) / T_layer) if band.sum() >= 5 else 0.0
         n_contact = int(band.sum())
         gd = equivalent_shear_rate(L)
-        # EXACT kernel deviatoric power columns. The HB Kirchhoff stress is 2 eta_app dev(D) with
+        # Exact kernel deviatoric power columns. The HB Kirchhoff stress is 2 eta_app dev(D) with
         # eta_app = eta + tau_y/gd, so the deviatoric stress power density is
         #   stress:dev(D) = 2 eta_app (dev(D):dev(D)) = eta_app * q,  q = 2 dev(D):dev(D) = gd^2 - eps^2.
         # Hence power = tau_y * (q/gd) + eta * q, i.e. the tau_y column is INT (q/gd) dV and the eta
         # column is INT q dV. (Using gd and gd^2 directly is only the eps->0 limit and slightly
         # over-counts the regularization floor at low shear.)
         q = np.maximum(gd ** 2 - EPS_GAMMA ** 2, 0.0)               # 2 dev(D):dev(D)
-        p = -(cau[:, 0, 0] + cau[:, 1, 1] + cau[:, 2, 2]) / 3.0      # 3D-trace pressure (ORACLE stress)
+        p = -(cau[:, 0, 0] + cau[:, 1, 1] + cau[:, 2, 2]) / 3.0      # 3D-trace pressure (oracle stress)
         div_v = L[:, 0, 0] + L[:, 1, 1] + L[:, 2, 2]                 # tr(L) = div(v)
         rec["t"].append(f * frame_dt)
         rec["F_plate"].append(F_react)
@@ -181,9 +159,9 @@ def run(n_grid=48, v_plate=0.08, eta=40.0, tau_y=200.0, density=1000.0, bulk=9.0
         rec["KE"].append(float(0.5 * density * np.sum(vol * np.sum(v ** 2, axis=1))))
         rec["X1"].append(float(np.sum((q / np.maximum(gd, 1e-12)) * vol)))   # tau_y column: INT (q/gd) dV
         rec["X2"].append(float(np.sum(q * vol)))                             # eta column:   INT q dV
-        # NOTE: Pvol uses the ORACLE Cauchy-trace pressure p; the correct_eos path below is therefore
-        # an ORACLE-STRESS correction, NOT an EOS-from-kinematics one. A load-cell pipeline cannot
-        # form INT p div(v) unless pressure/density is separately observed or inferred (see report).
+        # Pvol uses the oracle Cauchy-trace pressure p, so the correct_eos path below is an
+        # oracle-stress correction. A load-cell pipeline cannot form INT p div(v) unless
+        # pressure or density is separately observed or inferred.
         rec["Pvol"].append(float(np.sum(p * div_v * vol)))           # INT p div(v) dV (oracle p)
         plate_bottom = z - plate_hz
         rec["strain"].append((col_h - (plate_bottom - floor)) / col_h)
@@ -237,13 +215,8 @@ def run(n_grid=48, v_plate=0.08, eta=40.0, tau_y=200.0, density=1000.0, bulk=9.0
 
     if render:
         _figure(rec, ident, res, OUT / "squeeze_plate_franka_ident.png")
-        mp4 = OUT / out_name
-        subprocess.run(["ffmpeg", "-y", "-framerate", "16", "-i", str(tmp / "f_%04d.png"),
-                        "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "20",
-                        "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2", str(mp4)],
-                       check=True, capture_output=True)
+        mp4 = write_mp4(tmp, OUT / out_name, fps=16)
         res["mp4"] = str(mp4); res["fig"] = str(OUT / "squeeze_plate_franka_ident.png")
-        print("wrote", mp4)
 
     print(f"\n[arm-plate squeeze]   truth (tau_y, eta) = ({tau_y:.0f}, {eta:.0f})   "
           f"2D ref ({REF_2D['tau_y_hat']:.0f}, {REF_2D['eta_hat']:.0f})")
@@ -285,8 +258,5 @@ def _figure(rec, ident, res, path):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--device", default="auto", help="Warp device: auto (cuda if available), cuda:N, or cpu")
-    parser.add_argument("--no-render", action="store_true", help="skip video/figure rendering")
-    args = parser.parse_args()
+    args = device_cli(no_render=True).parse_args()
     run(device=args.device, render=not args.no_render)

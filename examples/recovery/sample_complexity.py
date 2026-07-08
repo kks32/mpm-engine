@@ -10,7 +10,7 @@ not improve with N: that is the refusal. We verify this directly: assemble the f
 spread to the Gauss-Markov prediction. The shear mode (large Fisher eigenvalue) tracks 1/sqrt(N) to
 its bias floor; the bulk mode (tiny eigenvalue) stays high regardless of N.
 
-Run:  .venv/bin/python -m sim.sample_complexity
+Run:  python -m examples.recovery.sample_complexity
 """
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
-from examples.recovery.elastic_drop import _polar_R   # noqa: E402
+from examples.recovery.elastic_drop import _polar_R
 
 OUT = ROOT / "out" / "elastic_drop"
 RNG = np.random.default_rng(0)

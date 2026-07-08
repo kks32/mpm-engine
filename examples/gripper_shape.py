@@ -1,35 +1,35 @@
-"""Press-to-identify, then GRIPPER-to-shape -- the RoboCraft/RoboCook loop driven by our identified
-MPM. A 2-finger gripper (two axis-aligned box colliders that close toward a midpoint) pinches the
-dough; a sequence of grips at chosen (x, y, axis, closing-width) sculpts it. The forward model is
-our warp von-Mises engine instantiated with the law identified from one press probe (#75).
+"""Press to identify, then shape with a gripper: the RoboCraft/RoboCook manipulation loop
+driven by the identified MPM. A 2-finger gripper (two axis-aligned box colliders that close
+toward a midpoint) pinches the dough; a sequence of grips at chosen (x, y, axis,
+closing-width) sculpts it. The forward model is the warp von-Mises engine instantiated
+with the law identified from one press probe (vonmises_identify.py).
 
-Engine constraint: the fork's box collider is axis-aligned, so a grip pinches along x or y (not an
-arbitrary angle). Coupling is sticky/no-friction, so this is the validated-regime approximation of a
-gripper (normal compression is faithful; tangential finger drag is an artifact we note).
+Engine constraint: the fork's box collider is axis-aligned, so a grip pinches along x or y
+rather than an arbitrary angle. Coupling is sticky without friction, which approximates a
+gripper in the validated regime: normal compression is faithful, and the tangential finger
+drag is a known artifact.
 
-Run:  ../.venv/bin/python -m examples.gripper_shape demo      # multi-grip sculpt demo
-      ../.venv/bin/python -m examples.gripper_shape plan      # CEM-plan grips to a target
+Run:  python -m examples.gripper_shape demo      # multi-grip sculpt demo
+      python -m examples.gripper_shape plan      # CEM-plan grips to a target
 """
 from __future__ import annotations
 
-import argparse
+import sys
 import time
 from pathlib import Path
 
 import numpy as np
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from common import chamfer, device_cli, write_mp4
 from warpmpm import GridConfig, Solver
 from warpmpm.materials import vonmises
 from warpmpm.scenes import block
 
 OUT = Path(__file__).resolve().parents[1] / "out" / "gripper_shape"
-ID_LAW = dict(E=7.70e5, nu=0.30, yield_stress=3045.3)        # identified from the press probe (#75)
+# identified from the press probe (vonmises_identify.py) vs the generating truth
+ID_LAW = dict(E=7.70e5, nu=0.30, yield_stress=3045.3)
 TRUE = dict(E=5e5, nu=0.30, yield_stress=3000.0)
-
-
-def chamfer(a, b):
-    d = np.sqrt(((a[:, None, :] - b[None, :, :]) ** 2).sum(-1) + 1e-18)
-    return float(d.min(1).mean() + d.min(0).mean())
 
 
 class GripperShapeScene:
@@ -131,7 +131,7 @@ class GripperShapeScene:
         return s.x(), frames
 
     def render_video(self, frames, target, mp4, fps=10):
-        import tempfile, subprocess
+        import tempfile
         import matplotlib; matplotlib.use("Agg"); import matplotlib.pyplot as plt
         from mpl_toolkits.mplot3d.art3d import Line3DCollection
         def edges(c, h):
@@ -157,10 +157,7 @@ class GripperShapeScene:
                 ax.view_init(elev=28, azim=-60)
             fig.suptitle("Press-identified MPM: 2-finger gripper shaping", fontsize=12)
             fig.tight_layout(); fig.savefig(tmp / f"f_{k:04d}.png", dpi=120, facecolor="white"); plt.close(fig)
-        subprocess.run(["ffmpeg", "-y", "-framerate", str(fps), "-i", str(tmp / "f_%04d.png"),
-                        "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "20",
-                        "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2", str(mp4)], check=True, capture_output=True)
-        print(f"wrote {mp4} ({len(frames)} frames)", flush=True)
+        write_mp4(tmp, Path(mp4), fps=fps)
         return mp4
 
     def loss(self, grips, target, params=None):
@@ -303,9 +300,8 @@ def video(device="auto"):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
+    parser = device_cli()
     parser.add_argument("which", nargs="?", default="demo", choices=("demo", "plan", "video", "tshape"))
-    parser.add_argument("--device", default="auto", help="Warp device: auto (cuda if available), cuda:N, or cpu")
     args = parser.parse_args()
     if args.which == "demo":
         demo(device=args.device)

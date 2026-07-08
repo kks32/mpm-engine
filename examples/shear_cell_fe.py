@@ -1,34 +1,37 @@
-"""Wide-shear-rate 2D shear cell: FE recovery of eta_app(gd) + a held-out ROLLOUT test.
+"""Wide-shear-rate 2D shear cell: FE recovery of eta_app(gd) plus a held-out rollout test.
 
-The 3D squeeze excites only ~1 decade of shear rate, so the learned viscous basis loses to a
-2-parameter Bingham fit there (narrow excitation, not a basis failure). This builds the dough
-analogue of the steady inclined chute: a quasi-2D plane-strain SHEAR CELL (thin-y slab between
-a sticky floor and a top wall translating in x) run at a SWEEP of wall speeds spanning >=2
-decades of gamma_dot. The mechanical power balance per frame,
+The 3D squeeze excites only about one decade of shear rate, where the learned viscous
+basis loses to a 2-parameter Bingham fit because the excitation is too narrow. This
+scene is the dough analogue of the steady inclined chute: a quasi-2D plane-strain shear
+cell (a thin-y slab between a sticky floor and a top wall translating in x) run at a
+sweep of wall speeds spanning two or more decades of gamma_dot. The mechanical power
+balance per frame,
 
-    INT eta_app(gd) gd^2 dV = P_wall + P_grav - dKE ,   P_wall = v_wall * F_x (grid-impulse),
+    INT eta_app(gd) gd^2 dV = P_wall + P_grav - dKE ,   P_wall = v_wall * F_x (grid impulse),
 
-is LINEAR in the basis coefficients for eta_app(gd) = sum_k theta_k g_k(gd). Pooling the sweep
-gives wide excitation, the family prior shrinks onto plausible dough laws, and the recovered FE
-curve beats Bingham on the truth Herschel-Bulkley (shear-thinning, which Bingham cannot fit).
+is linear in the basis coefficients for eta_app(gd) = sum_k theta_k g_k(gd). Pooling the
+sweep gives wide excitation, the family prior shrinks onto plausible dough laws, and the
+recovered FE curve beats Bingham on the shear-thinning Herschel-Bulkley truth.
 
-The point the user asked for is ROLLOUT, not parameters: we re-simulate a HELD-OUT shear speed
-with the recovered law and compare to truth. The FE curve is re-simulated DIRECTLY via the new
-tabulated-viscosity material (fork id 12), no parametric fit. We report the wall-force rollout
-error and the shear-profile (deformation) rollout error for FE vs Bingham vs truth.
+The decisive metric is the rollout: a held-out shear speed is re-simulated with the
+recovered law and compared to truth, with the FE curve re-simulated directly via the
+tabulated-viscosity material (fork id 12) rather than through a parametric fit. Reported:
+the wall-force rollout error and the shear-profile (deformation) rollout error for FE,
+Bingham, and truth.
 
-Run:  PYTHONPATH=src ../.venv/bin/python examples/shear_cell_fe.py          # full sweep + rollout
-      PYTHONPATH=src ../.venv/bin/python examples/shear_cell_fe.py probe    # one segment probe
+Run:  python examples/shear_cell_fe.py          # full sweep + rollout
+      python examples/shear_cell_fe.py probe    # one segment probe
 """
 from __future__ import annotations
 
-import argparse
 import sys
 import time
 from pathlib import Path
 
 import numpy as np
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from common import device_cli, equivalent_shear_rate
 from warpmpm import GridConfig, Solver, newtonian, tabulated_viscous
 from warpmpm.coupling.backend import WarpMPMBackend
 
@@ -55,11 +58,9 @@ def eta_app_true(gd):
 
 
 def _gd(L):
-    # match the kernel exactly: |gd|_eps = sqrt(2 dev(D):dev(D) + eps^2), eps=0.05
-    D = 0.5 * (L + np.transpose(L, (0, 2, 1)))
-    tr = (D[..., 0, 0] + D[..., 1, 1] + D[..., 2, 2]) / 3.0
-    Dd = D - tr[..., None, None] * np.eye(3)
-    return np.sqrt(2.0 * np.einsum("...ij,...ij->...", Dd, Dd) + EPS ** 2)
+    # the kernel-matched regularized shear rate; kept under this name because the
+    # experiments scripts import it from here
+    return equivalent_shear_rate(L, EPS)
 
 
 def _build_slab(grid: GridConfig):
@@ -177,7 +178,7 @@ def _power_rows(seg, fe):
 def viscous_prior(fe, s_grid, n=800, seed=0):
     """Scale-aware family-coefficient prior: encode physically-scaled dough eta_app(gd) curves
     into the FE basis -> Gaussian prior (theta_bar, Sigma) over plausible dough laws. (Same as
-    examples/dough_fe_viscous.viscous_prior; inlined so this script runs standalone.)"""
+    experiments/dough_fe_viscous.viscous_prior; inlined so this script runs standalone.)"""
     rng = np.random.default_rng(seed)
     gd = 10.0 ** s_grid
     g = np.sqrt(gd ** 2 + EPS ** 2)
@@ -222,7 +223,7 @@ def run(speeds=(0.006, 0.012, 0.025, 0.05, 0.1, 0.2, 0.4, 0.8), v_holdout=0.16,
     fdt = 2.0e-3
 
     # ---- training sweep: pool wide-shear-rate power-balance rows --------------------
-    # NATURAL dissipation weighting (no per-segment rescaling): the power balance is itself
+    # Natural dissipation weighting, no per-segment rescaling: the power balance is itself
     # dissipation (~eta_app*gd^2) weighted, so it constrains eta_app exactly where the dynamics
     # live. Equalizing segments would over-weight the weak near-yield low-gd data and degrade
     # the recovery at the operating shear rate (verified: it roughly doubles the rollout error).
@@ -287,12 +288,13 @@ def run(speeds=(0.006, 0.012, 0.025, 0.05, 0.1, 0.2, 0.4, 0.8), v_holdout=0.16,
     print(f"    FE, no prior  (K=8)      relL2={r_fe0*100:5.1f}%")
     print(f"    FE + family prior (K=8)  relL2={r_fe*100:5.1f}%  diss-wtd={rw_fe*100:5.1f}%")
 
-    # ---- held-out ROLLOUT: the self-consistent test (learn from sim -> re-sim in sim) ----
-    # The recovered eta_app(gd) is trained on the simulator's MEASURED (G2P-smoothed) shear
-    # rate and re-simulated in the SAME simulator, so the honest metric is the rollout, not
-    # the curve vs the analytic continuum law. The FE curve is re-simulated DIRECTLY via the
-    # tabulated-viscosity material; the analytic offset (the constant ~1.4 closure factor
-    # between discrete wall power and continuum INT eta gd^2 dV) cancels in this loop.
+    # ---- held-out rollout: the self-consistent test (learn from sim, re-sim in sim) ----
+    # The recovered eta_app(gd) is trained on the simulator's measured (G2P-smoothed) shear
+    # rate and re-simulated in the same simulator, so the meaningful metric is the rollout
+    # rather than the curve against the analytic continuum law. The FE curve is re-simulated
+    # directly via the tabulated-viscosity material; the analytic offset (the constant ~1.4
+    # closure factor between discrete wall power and continuum INT eta gd^2 dV) cancels in
+    # this loop.
     s_tab = np.linspace(-1.0, 2.0, 128)
     gd_tab = 10.0 ** s_tab
     tab_fe = np.clip(fe.phi(gd_tab) @ theta_fe, 0.5, None)
@@ -303,8 +305,8 @@ def run(speeds=(0.006, 0.012, 0.025, 0.05, 0.1, 0.2, 0.4, 0.8), v_holdout=0.16,
         "FE no prior": tabulated_viscous(tab_fe0, -1.0, 2.0, RHO, 9.0e5),
         "Bingham": newtonian(eta=eta_b, density=RHO, bulk_modulus=9.0e5).with_yield(tau_y_b),
     }
-    print(f"\n  held-out ROLLOUT at v={v_holdout} m/s (NOT in the training sweep) -- the")
-    print("  self-consistent test (sim -> learn -> re-sim); relL2 of the predicted dynamics:")
+    print(f"\n  held-out rollout at v={v_holdout} m/s (excluded from the training sweep):")
+    print("  self-consistent test (sim, learn, re-sim); relL2 of the predicted dynamics:")
     nf_h = int(np.clip(round(0.4 * COL_W / (v_holdout * fdt)), 60, 160))
     roll = {tag: shear_segment(v_holdout, mat, n_frames=nf_h, record_pos=True,
                                device=device)
@@ -440,9 +442,8 @@ def _figure(gg, eta_tr, eta_bg, eta_fe0, eta_fe, r_bg, r_fe0, r_fe, band,
 
 if __name__ == "__main__":
     OUT.mkdir(parents=True, exist_ok=True)
-    parser = argparse.ArgumentParser()
+    parser = device_cli()
     parser.add_argument("which", nargs="?", default="run", choices=("run", "probe", "replot"))
-    parser.add_argument("--device", default="cuda:0", help="Warp MPM device, e.g. cuda:0 or cuda:1")
     args = parser.parse_args()
     if args.which == "probe":
         probe(device=args.device)

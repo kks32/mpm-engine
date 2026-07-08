@@ -4,7 +4,7 @@ The Franka carries a three-fingered tool: three box fingertips spaced 120 degree
 mounted at the gripper and closing radially inward. The arm descends onto a dough slab,
 the three prongs bite in and close to a core radius, and the slab is formed into a
 three-lobed cross-section. The dough is our warp von-Mises engine with the law identified
-from one press probe (#75). The Panda's own two-finger gripper is hidden, so the three
+from one press probe. The Panda's own two-finger gripper is hidden, so the three
 prong boxes read as the end-effector.
 
 Same scaffolding as dough_franka_press.py: the MPM tools are driven by WarpMPMBackend, the
@@ -12,7 +12,7 @@ arm is posed by inverting its EE kinematics so the gripper tracks the prong clus
 shared metric frame), and the composite view is rendered with render_with_particles
 (arm + the three prong boxes + dough particles).
 
-Run:  ../.venv/bin/python examples/dough_franka_threeprong.py
+Run:  python experiments/dough_franka_threeprong.py
 """
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ from warpmpm.coupling.backend import WarpMPMBackend
 from warpmpm.materials import vonmises
 
 OUT = Path(__file__).resolve().parents[1] / "out" / "three_prong"
-ID_LAW = dict(E=7.70e5, nu=0.30, yield_stress=3045.3)     # identified from the press probe (#75)
+ID_LAW = dict(E=7.70e5, nu=0.30, yield_stress=3045.3)     # identified from the press probe
 ANGLES = np.deg2rad([90.0, 210.0, 330.0])                 # three prongs, 120 deg apart
 
 
@@ -179,9 +179,9 @@ class FrankaThreeProng:
             plt.close(fig)
             fcount += 1
 
-        # phase A: descend the open cluster onto the dough. Pass the START-of-tick
+        # phase A: descend the open cluster onto the dough. Pass the start-of-tick
         # centre + velocity; the fork advances the collider by dt_ctrl*velocity over
-        # the step, so pos is advanced AFTER the step (pre-advancing double-moves it).
+        # the step, so pos is advanced after the step (pre-advancing double-moves it).
         for i in range(n_desc):
             for k in range(3):
                 backend.set_tool_kinematics(H[k], center=tuple(pos[k]),

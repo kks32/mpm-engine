@@ -1,9 +1,8 @@
-"""Minimal mesh->SDF pour: two watertight cup MESHES voxelized to signed-distance
+"""Minimal mesh->SDF pour: two watertight cup meshes voxelized to signed-distance
 colliders, one tilted by a scripted angular velocity. This is the API demo for the
 general mesh->SDF collider path (warpmpm.geometry.build_sdf_cached + add_sdf_collider),
-which handles arbitrary watertight meshes. For the full Franka pouring EXPERIMENT
-(Genesis-twin honey pour, metrics, leak audit, analytic revolved glasses) see
-examples/pour_franka.py.
+which handles arbitrary watertight meshes. For the full Franka pour with metrics,
+leak audit, and analytic revolved glasses, see examples/pour_franka.py.
 
 Run:  python -m examples.pour_glass            # simulate + render an mp4
       python -m examples.pour_glass --no-render # simulate only (prints transfer stats)
@@ -18,9 +17,9 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from warpmpm import GridConfig, Solver                       # noqa: E402
-from warpmpm.geometry import build_sdf_cached, make_cup_mesh  # noqa: E402
-from warpmpm.materials import newtonian                       # noqa: E402
+from warpmpm import GridConfig, Solver
+from warpmpm.geometry import build_sdf_cached, make_cup_mesh
+from warpmpm.materials import newtonian
 
 OUT = ROOT / "out" / "pour"
 CACHE = ROOT / "out" / "sdf_cache"

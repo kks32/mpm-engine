@@ -1,19 +1,19 @@
 """Real-data-shaped ingestion + identification, evaluated on 1x and 1.5x dough volume.
 
-Treats the simulation output the way a real rig would deliver it: a TEXTURED-SURFACE video
-(-> CoTracker tracks, the deformation) plus a MEASURED plate force CSV (a load cell / wrist
-FT sensor) plus camera calibration + plate kinematics. NOTHING from the simulator internals
-is used downstream -- only the video, the force file, and the calibration.
+Treats the simulation output the way a real rig would deliver it: a textured-surface video
+(-> CoTracker tracks, the deformation) plus a measured plate force CSV (a load cell / wrist
+FT sensor) plus camera calibration + plate kinematics. Nothing from the simulator internals
+is used downstream; only the video, the force file, and the calibration.
 
 Quasi-2D plane strain (thin y-slab, slip y/x walls) so the front-face surface tracks
 represent the volume. The identification:
   tracks -> world (x,z) -> StreamFunctionField (div-free velocity field) -> strain rate |gd|
-  -> volume integrals; the MEASURED force gives the plate power; the mechanical power balance
+  -> volume integrals; the measured force gives the plate power; the mechanical power balance
   INT tau:D = P_plate + P_grav - dKE/dt  with  INT tau:D = tau_y INT|gd| + eta INT|gd|^2
   is regressed over the press -> (tau_y, eta).
 
 We build datasets for 1x and 1.5x volume, identify each from "measurements", and compare to
-the ground-truth (tau_y, eta)=(200,40). Run:  ../.venv/bin/python examples/realdata_pipeline.py
+the ground-truth (tau_y, eta)=(200,40). Run:  python experiments/realdata_pipeline.py
 """
 from __future__ import annotations
 
@@ -98,7 +98,7 @@ def make_dataset(scale, tag, n_grid=64, v_plate=0.08, press_strain=0.5, dt=1.0e-
             be.reset_tool_force(tool); be.step(dt, substeps)
         z = zn; prev = zn
         Fz = abs(float(be.get_tool_reaction(tool, fdt)[2])) if f > 0 else 0.0
-        rows.append((f * fdt, Fz))                                  # MEASURED force (load cell)
+        rows.append((f * fdt, Fz))                                  # measured force (load cell)
         if f % frame_stride:
             continue
         x = s.x()
@@ -250,7 +250,7 @@ def _slab_force_series(scale, tau_y, eta, n_grid=64, v_plate=0.08, press_strain=
 
 
 def rollout_error(tag, device="auto"):
-    """Re-sim the RECOVERED law and compare its force rollout to ground truth -- the metric
+    """Re-sim the recovered law and compare its force rollout to ground truth, the metric
     that matters (tau_y/eta trade off; what counts is reproducing the dynamics)."""
     r = _loadj(OUT / tag / "identify.json")
     scale = _loadj(OUT / tag / "meta.json")["scale"]

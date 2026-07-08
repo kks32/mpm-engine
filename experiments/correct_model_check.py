@@ -1,16 +1,16 @@
 """Control: is FE's win over the true-form Herschel-Bulkley fit an identifiability/
 regularization effect, not a model-class effect?
 
-The 3D shear cell gave FE 11% and Bingham 34% held-out force rollout. Fitting the TRUE
+The 3D shear cell gave FE 11% and Bingham 34% held-out force rollout. Fitting the true
 3-term form eta_app = eta + tau_y/g + pk*g^(pn-1) to the same data by plain least squares
-gave a WORSE 30% rollout: the data under-determines the curve (the yield term tau_y/g and
+gave a worse 30% rollout: the data under-determines the curve (the yield term tau_y/g and
 the power-law term pk*g^(pn-1) are nearly collinear over a finite band), so the unregularized
-fit collapses tau_y -> 0 and mispredicts. This adds a RIDGE-REGULARIZED HB fit toward a
+fit collapses tau_y -> 0 and mispredicts. This adds a ridge-regularized HB fit toward a
 generic (not truth) dough prior, the parametric analogue of FE's Gram smoothness + corpus
 basis, re-simulates both HB variants on the held-out speed, and plots the eta_app curves and
 the force-rollout traces for truth / FE / Bingham / HB-LSQ / HB-ridge.
 
-Run:  PYTHONPATH=src ../.venv/bin/python examples/correct_model_check.py
+Run:  python experiments/correct_model_check.py
 """
 from __future__ import annotations
 
@@ -71,7 +71,7 @@ def fit_hb_lsq(frames):
 
 
 def fit_hb_ridge(frames, rho=1.0, pn_prior=None, pn_sig=0.25, w_pn=0.01):
-    """Ridge toward a GENERIC dough prior (not the truth), in column-normalized coords so
+    """Ridge toward a generic dough prior (not the truth), in column-normalized coords so
     the prior strength is commensurate with the data. The prior pins the collinear
     (tau_y, pk) direction the data cannot resolve, exactly like FE's smoothness/corpus bias.
     With pn_prior set, the nonlinear exponent is also regularized (the residual is nearly

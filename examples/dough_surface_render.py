@@ -1,22 +1,23 @@
-"""Render the MPM dough as a CONTINUOUS SURFACE (not particles) -- the "pizza dough" look.
+"""Render the MPM dough as a continuous surface, the way real dough looks.
 
-Particles are a discretization; real dough is a continuous body. Each frame we splat the
-particle cloud onto a fine density grid, smooth it, and extract an isosurface with marching
-cubes (skimage) -> a watertight triangle mesh, shaded as dough and rendered with the pressing
-plate. This is the standard surface-reconstruction path for MPM/SPH ("fluid surfacing").
-Run:  ../.venv/bin/python examples/dough_surface_render.py
+Particles are a discretization; real dough is a continuous body. Each frame splats the
+particle cloud onto a fine density grid, smooths it, and extracts an isosurface with
+marching cubes: a watertight triangle mesh, shaded as dough and rendered with the
+pressing plate. This is the standard surface-reconstruction path for MPM and SPH
+("fluid surfacing").
+
+Run:  python examples/dough_surface_render.py
 """
 from __future__ import annotations
 
-import argparse
-import subprocess
+import sys
 from pathlib import Path
 
 import numpy as np
-from scipy.ndimage import gaussian_filter
 from scipy.spatial import cKDTree
-from skimage.measure import marching_cubes
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from common import device_cli, surface_from_cloud, write_mp4
 from warpmpm import GridConfig, Solver, block, newtonian
 from warpmpm.coupling.backend import WarpMPMBackend
 
@@ -25,20 +26,8 @@ LIGHT = np.array([0.35, 0.55, 0.78]); LIGHT = LIGHT / np.linalg.norm(LIGHT)
 DOUGH = np.array([0.95, 0.82, 0.55])     # pizza-dough cream
 DOUGH_TOP = np.array([0.86, 0.66, 0.40])  # slightly browner top
 
-
-def _surface(x, cell=0.0033, sigma=1.3, level=0.18):
-    """Particle cloud -> smoothed density field -> isosurface mesh (world verts, faces, fnorm)."""
-    mn = x.min(0) - 0.012; mx = x.max(0) + 0.012
-    dims = np.ceil((mx - mn) / cell).astype(int)
-    rng = [(mn[i], mn[i] + dims[i] * cell) for i in range(3)]
-    H, _ = np.histogramdd(x, bins=dims, range=rng)
-    H = gaussian_filter(H.astype(float), sigma=sigma)
-    H /= max(H.max(), 1e-9)
-    verts, faces, _, _ = marching_cubes(H, level=level)
-    vw = mn + verts * cell
-    fn = np.cross(vw[faces[:, 1]] - vw[faces[:, 0]], vw[faces[:, 2]] - vw[faces[:, 0]])
-    fn /= np.linalg.norm(fn, axis=1, keepdims=True) + 1e-9
-    return vw, faces, fn
+# kept under this name because experiments/surface_track_test.py imports it from here
+_surface = surface_from_cloud
 
 
 def _box_polys(cx, cy, cz, hx, hy, hz):
@@ -116,17 +105,12 @@ def run(tau_y=200.0, eta=40.0, geom=(0.16, 0.16, 0.06), n_grid=52, v_plate=0.08,
             shutil.copy(tmp / f"s_{k:04d}.png", OUT / "dough_surface_still.png")
         k += 1
         print(f"frame {f:3d}/{nf} strain={strain:4.1f}% mesh {len(vw)} verts")
-    mp4 = OUT / "dough_surface.mp4"
-    subprocess.run(["ffmpeg", "-y", "-framerate", "10", "-i", str(tmp / "s_%04d.png"),
-                    "-c:v", "libx264", "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
-                    "-pix_fmt", "yuv420p", str(mp4)], check=True, capture_output=True)
-    print("wrote", mp4, "and", OUT / "dough_surface_still.png")
+    mp4 = write_mp4(tmp, OUT / "dough_surface.mp4", fps=10, pattern="s_%04d.png")
+    print("also wrote", OUT / "dough_surface_still.png")
     return {"video": str(mp4), "still": str(OUT / "dough_surface_still.png"),
             "device": device}
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--device", default="cuda:0", help="Warp MPM device, e.g. cuda:0 or cuda:1")
-    args = parser.parse_args()
+    args = device_cli().parse_args()
     run(device=args.device)

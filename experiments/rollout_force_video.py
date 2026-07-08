@@ -4,7 +4,7 @@ Reuses the arm-driven squeeze frames already rendered by rollout_franka_cotracke
 (out/rollout_arm/{truth,learned}/), re-captures the Newton-exact grid-impulse plate force per
 frame for each law, and assembles one video: ground-truth render | predicted render, with the
 truth vs predicted plate-force-vs-strain trace below (marker at the current frame). Also writes
-a clean static force graph. Run:  ../.venv/bin/python examples/rollout_force_video.py
+a clean static force graph. Run:  python experiments/rollout_force_video.py
 """
 from __future__ import annotations
 

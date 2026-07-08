@@ -5,10 +5,10 @@ near-cube fingertip (its footprint is roughly isotropic, so the approach angle d
 need a rotated box). Three fingertips sit at 0, 120, and 240 degrees around the dough
 center and close radially inward to a core radius, which forms the slab into a three-lobed
 cross-section. The forward model is our warp von-Mises engine with the law identified
-from one press probe (#75). A cleaner version would use an oriented capsule or sphere SDF
+from one press probe. A cleaner version would use an oriented capsule or sphere SDF
 fingertip; that is a small engine addition noted for later.
 
-Run:  ../.venv/bin/python -m examples.three_prong
+Run:  python -m examples.three_prong
 """
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ from warpmpm.materials import vonmises
 from warpmpm.scenes import block
 
 OUT = Path(__file__).resolve().parents[1] / "out" / "three_prong"
-ID_LAW = dict(E=7.70e5, nu=0.30, yield_stress=3045.3)     # identified from the press probe (#75)
+ID_LAW = dict(E=7.70e5, nu=0.30, yield_stress=3045.3)     # identified from the press probe
 ANGLES = np.deg2rad([90.0, 210.0, 330.0])                 # three prongs, 120 deg apart
 
 
@@ -58,8 +58,8 @@ class ThreeProngScene:
         frames = [dict(x=s.x().copy(), boxes=[(tuple(pos[k]), self.fhalf) for k in range(3)],
                        label="prongs open")]
         for i in range(nclose):
-            # pass the START-of-tick centre + velocity; the fork advances the collider
-            # by dt_ctrl*velocity over the step. Advance pos AFTER the step, never
+            # pass the start-of-tick centre + velocity; the fork advances the collider
+            # by dt_ctrl*velocity over the step. Advance pos after the step, never
             # before, or the box double-moves (2x the commanded close speed).
             for k in range(3):
                 s.set_box(H[k], center=tuple(pos[k]), velocity=vel[k])

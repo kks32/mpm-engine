@@ -8,7 +8,7 @@ CoTracker3 on the dough to extract the material deformation, then compare the pr
 rollout (learned law) to the truth rollout. The error is normalized by how far the material
 actually moves: "the predicted deformation differs from truth by X% of the observed motion."
 Arm motion is identical for both laws (displacement control), so the difference isolates the
-dough. Run:  ../.venv/bin/python examples/rollout_franka_cotracker.py
+dough. Run:  python experiments/rollout_franka_cotracker.py
 """
 from __future__ import annotations
 

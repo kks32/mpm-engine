@@ -17,8 +17,8 @@ the same divergence-free test fields used in A. A total plate force is enough fo
 but not enough for arbitrary tensor weak-form rows.
 
 Run:
-  python examples/pressure_covariance_sweep.py --device cuda:0
-  python examples/pressure_covariance_sweep.py --device cuda:0 --seed 0  # quick single-seed run
+  python experiments/pressure_covariance_sweep.py --device cuda:0
+  python experiments/pressure_covariance_sweep.py --device cuda:0 --seed 0  # quick single-seed run
 """
 from __future__ import annotations
 

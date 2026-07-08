@@ -1,8 +1,9 @@
-"""#75 -- force-based identification of von-Mises (G, yield) from ONE robot squeeze probe.
+"""Force-based identification of von-Mises (G, yield) from one robot squeeze probe.
 
-The observable is the PLATE REACTION FORCE (grid-impulse, the wrist-F/T analog) plus kinematics;
-no constitutive parameter is read from the dumped stress except a small volumetric (pressure)
-correction, exactly as the viscoplastic squeeze recovery does (squeeze_plate_franka.py).
+The observable is the plate reaction force (grid impulse, the wrist-F/T analog) plus
+kinematics; no constitutive parameter is read from the dumped stress except a small
+volumetric (pressure) correction, exactly as the viscoplastic squeeze recovery does
+(squeeze_plate_franka.py).
 
 Mechanical power balance over the squeeze (P does no NET unknown work; the volumetric part is a
 known elastic correction):
@@ -17,16 +18,18 @@ Two windows make it a pair of convex 1-parameter regressions:
 The yield recovery rides on the fork's exact yield convention (||dev Kirchhoff||>yield_stress), so
 it is robust to the StVK elastic-predictor stress factor (which only biases the elastic G slightly).
 
-Run:  ../.venv/bin/python examples/vonmises_identify.py
+Run:  python examples/vonmises_identify.py
 """
 from __future__ import annotations
 
-import argparse
 import json
+import sys
 from pathlib import Path
 
 import numpy as np
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from common import device_cli
 from warpmpm import GridConfig, Solver
 from warpmpm.materials import vonmises
 from warpmpm.scenes import block
@@ -51,8 +54,9 @@ def _dev(T):
 def probe(G_true_E=5e5, nu=0.30, yield_true=3000.0, density=1000.0, bulk=9e5,
           n_grid=32, ppc=2, v_plate=0.08, n_frames=220, sub=4, compress=0.014,
           size=(0.12, 0.08, 0.06), device="auto"):
-    """Run one squeeze probe; return per-frame power-balance quantities. `size` sets the block
-    (object instance) -- the identified (G, yield) is a MATERIAL property and must not depend on it."""
+    """Run one squeeze probe; return per-frame power-balance quantities. `size` sets the
+    block instance; the identified (G, yield) is a material property and must not depend
+    on it."""
     g = GridConfig(n_grid=n_grid, grid_lim=0.30)
     pos, vol0, floor = block(g, size=size, center=(0.15, 0.15, 0.05), ppc=ppc)
     N = len(pos); m = density * vol0
@@ -120,7 +124,7 @@ def identify(rec, elastic_frac=0.06, plastic_frac=0.40):
 
 
 def run(device="auto"):
-    print("=== #75 force-based von-Mises (G, yield) identification from one squeeze ===", flush=True)
+    print("=== force-based von-Mises (G, yield) identification from one squeeze ===", flush=True)
     rec = probe(device=device)
     meta = rec["_meta"]
     comp = 100 * (meta["z0"] - (meta["z0"] - rec["disp"][-1])) / meta["z0"]
@@ -150,7 +154,5 @@ def run(device="auto"):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--device", default="auto", help="Warp device: auto (cuda if available), cuda:N, or cpu")
-    args = parser.parse_args()
+    args = device_cli().parse_args()
     run(device=args.device)

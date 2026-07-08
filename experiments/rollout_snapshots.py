@@ -1,11 +1,11 @@
 """Snapshot grid of the held-out 3D shear rollout: rows = truth / FE / HB-ridge / Bingham,
 columns = time points. The dough (x-z projection) coloured by speed. The shapes track across
-all four laws (displacement-controlled motion), which is exactly why the FORCE, not the
+all four laws (displacement-controlled motion), which is exactly why the force, not the
 deformation, is the discriminator (FE 11%, HB-ridge 25%, Bingham 34% on the wall force).
 
 Uses the cached truth/FE/Bingham trajectories (out/shear_cell_3d/rollout_3d.npz) and re-sims
 the HB-ridge law (recovered in correct_model_check.py). Run:
-  PYTHONPATH=src ../.venv/bin/python examples/rollout_snapshots.py
+  python experiments/rollout_snapshots.py
 """
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ def run():
     floor = float(d["floor"])
     nft = len(d["X_truth"])
 
-    # re-sim HB-ridge with the SAME stride/length so its frames align with the cache
+    # re-sim HB-ridge with the same stride/length so its frames align with the cache
     mat = (newtonian(eta=HB_RIDGE["eta"], density=S.RHO, bulk_modulus=9.0e5)
            .with_yield(HB_RIDGE["tau_y"]).with_powerlaw(K=HB_RIDGE["pk"], n=HB_RIDGE["pn"]))
     seg = S.shear_segment(V_HOLDOUT, mat, n_frames=160, record_traj=True, traj_stride=2)

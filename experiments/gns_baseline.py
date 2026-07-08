@@ -1,17 +1,17 @@
-"""In-house GNS (Graph Network Simulator) baseline -- the RoboCraft/RoboCook/lgbnd learned-dynamics
+"""In-house GNS (Graph Network Simulator) baseline: the RoboCraft/RoboCook/lgbnd learned-dynamics
 approach, reproduced in pure torch (their repos need pytorch3d/torch_geometric/taichi, all absent).
 Architecture is the standard Sanchez-Gonzalez encode-process-decode: a KNN particle graph, node +
 edge MLP encoders, L message-passing steps, a node decoder predicting per-particle displacement.
 
-Trained on K warp von-Mises rollouts; used as the forward model for the SAME CEM shape planner as
+Trained on K warp von-Mises rollouts; used as the forward model for the same CEM shape planner as
 our identified MPM. This is the head-to-head for "how do we do vs a GNS in their setting":
-  * data efficiency: ours needs ONE force probe; the GNS needs K rollouts to reach a given accuracy.
+  * data efficiency: ours needs one force probe; the GNS needs K rollouts to reach a given accuracy.
   * transfer:        ours is a material law (size-independent); the GNS is trained per-instance.
 
 ident/ must never import torch; this lives under mpm_engine/examples (a baseline, not the method).
 
-Run:  ../.venv/bin/python -m examples.gns_baseline gen      # generate warp rollout data
-      ../.venv/bin/python -m examples.gns_baseline train    # train + 1-step/rollout accuracy vs K
+Run:  python -m examples.gns_baseline gen      # generate warp rollout data
+      python -m examples.gns_baseline train    # train + 1-step/rollout accuracy vs K
 """
 from __future__ import annotations
 
@@ -213,7 +213,8 @@ def compare(Ks=(2, 5, 10, 20, 40), n_test=4, epochs=40, device="auto"):
     def err(pred_finals):
         return float(np.mean([np.sqrt(((p - g[0]) ** 2).sum(-1)).mean() * 1000 for p, g in zip(pred_finals, gt)]))
 
-    # identified MPM (yield 1.5% err): E_hat=7.70e5, yield_hat=3045 (from #75) -- re-sim the test actions
+    # identified MPM (yield 1.5% err, from the press probe): E_hat=7.70e5, yield_hat=3045;
+    # re-sim the test actions
     id_law = dict(E=7.70e5, nu=0.30, yield_stress=3045.3)
     mpm_finals = [f[0] for f in _test_rollouts(sub_idx, test_actions, params=id_law,
                                                device=device)]

@@ -2,17 +2,18 @@
 
 Streams the von-Mises plasticine drop frame-by-frame through the convex weak-form solve,
 accumulating the Fisher information M_t = sum A_t^T A_t for (G, lambda) (Hencky stress basis),
-and tracks the yield via the running deviatoric-strain saturation. Recursive (RLS) -- the
-plasticine analogue of sim.elastic_identify_sequential, so the same bounds (approximation = FE
-SVD tail incl. plasticine; sample-complexity; recursive consistency) cover the 5th family.
+and tracks the yield via the running deviatoric-strain saturation. Recursive (RLS): the
+plasticine analogue of examples.recovery.elastic_identify_sequential, so the same bounds
+(approximation = FE SVD tail incl. plasticine; sample-complexity; recursive consistency)
+cover the 5th family.
 
 Shows:
   - G posterior mean +/- 95% credible band vs frame: flat at the prior in free-fall, contracts
     to truth at impact (recursive estimation, no backprop).
-  - yield estimate vs frame: REFUSED (lower bound) until the deviatoric strain saturates at the
-    cap (the material yields), then locks to truth -- the plastic gate, in time.
+  - yield estimate vs frame: refused (lower bound) until the deviatoric strain saturates at the
+    cap (the material yields), then locks to truth; the plastic gate, in time.
 
-Run:  .venv/bin/python -m sim.plastic_identify_sequential
+Run:  python -m examples.recovery.plastic_identify_sequential
 """
 from __future__ import annotations
 
@@ -78,7 +79,7 @@ def stream(dump="yield.npz", prior_G=2.0e5, prior_nu=0.30):
             sat_run = max(sat_run, p995)
         prec = M + prior_prec; Sig = np.linalg.inv(prec); th = Sig @ (rhs + prior_prec @ prior_mean)
         G_h = th[0]; G_std = float(np.sqrt(max(Sig[0, 0], 0)))
-        is_yld = (A is not None) and (plateau > 0.85) and (p995 > 0.01)   # plateau AND real strain
+        is_yld = (A is not None) and (plateau > 0.85) and (p995 > 0.01)   # plateau and real strain
         if is_yld and yielded_at is None:
             yielded_at = t * fdt
         y_h = 2.0 * G_h * sat_run

@@ -1,21 +1,21 @@
-"""Predict an unseen dough volume's DEFORMATION and validate it through the camera pipeline.
+"""Predict an unseen dough volume's deformation and validate it through the camera pipeline.
 
-Closed loop: learn the rheology on one squeeze, then SIMULATE a different dough volume with
-each candidate law, RENDER it to a trackable speckle video (front/wall-plane view), run
-CoTracker3 (the real perception pipeline), and compare the predicted deformation ROLLOUT to
-the ground truth -- the error is the tracked material motion, not the force.
+Closed loop: learn the rheology on one squeeze, then simulate a different dough volume with
+each candidate law, render it to a trackable speckle video (front/wall-plane view), run
+CoTracker3 (the real perception pipeline), and compare the predicted deformation rollout to
+the ground truth; the error is the tracked material motion, not the force.
 
 We render three forward runs on the unseen volume:
   truth   (tau_y=200, eta=40)   learned (tau_y=192, eta=55, grid-impulse)
-  wrong   (tau_y=800, eta=200)  -- a deliberately bad law, to test how much deformation
-                                   actually discriminates the rheology.
+  wrong   (tau_y=800, eta=200)  a deliberately bad law, to test how much deformation
+                                actually discriminates the rheology.
 All three start from the identical blob, share one camera, so a common CoTracker query grid
 follows corresponding material points; we compare world-space tracks point-to-point.
 
 NOTE: the plate descent is displacement-controlled, so vertical compression is prescribed;
 the rheology-dependent signal is the lateral extrusion. This quantifies how well deformation
 (vs the force) validates the learned law. Run:
-  ../.venv/bin/python examples/predict_volume_rollout.py
+  python experiments/predict_volume_rollout.py
 """
 from __future__ import annotations
 
@@ -77,7 +77,7 @@ def squeeze_dump(tau_y, eta, geom, n_grid=52, v_plate=0.08, press_strain=0.5,
 
 def render_speckle(X, times, bbox, out_dir, stem, width=520, dot_px=3.2, margin=0.06):
     """Front-camera speckle video (orthographic along -y -> x,z), shared `bbox` so every law
-    uses ONE camera. track.py-compatible cam.json. Adapted from perception.render_collapse3d."""
+    uses one camera. track.py-compatible cam.json. Adapted from perception.render_collapse3d."""
     out_dir = Path(out_dir); out_dir.mkdir(parents=True, exist_ok=True)
     Xc, Yc, Zc = X[..., 0], X[..., 1], X[..., 2]
     x0, x1, z0, z1 = bbox

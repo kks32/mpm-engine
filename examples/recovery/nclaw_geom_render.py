@@ -1,21 +1,11 @@
-"""Paper-quality 3D render of the NCLaw geometry-generalization experiment.
+"""Shared PyVista surfacing and scene helpers for the recovery renders.
 
-Surfaces the MPM particle cloud per frame (density field -> marching cubes -> Taubin smoothing)
-and renders it as a shaded solid on a ground plane with a soft cast shadow, coloured by the
-accumulated equivalent shear strain (the "where did the material deform" field, NCLaw-style).
-Produces, for each shape (NCLaw's own bunny / dragon meshes):
-
-  nclaw_<shape>_strain.mp4   -- truth | recovered side by side, strain-coloured, the whole
-                                collapse; the two clouds flow and settle together (the held-out
-                                geometry generalization of a mu(I) recovered from ONE collapse).
-  nclaw_<shape>_hero.png     -- a 4-snapshot strip (t = 0, early, mid, settled) of the truth
-                                collapse, the recognizable shape slumping into a pile.
-
-Surfacing is render-only; it does not touch the physics. Reads the schema-valid dumps written
-by sim.nclaw_geom_scene.
-
-Run:  .venv/bin/python -m sim.nclaw_geom_render            # bunny + dragon: videos + hero strips
-      .venv/bin/python -m sim.nclaw_geom_render bunny hero # just the bunny hero strip
+Not a standalone example: elastic_render.py imports _poly, _setup, and _view from here.
+The helpers surface an MPM particle cloud (density field -> marching cubes -> Taubin
+smoothing) and set up a shaded ground-plane scene with a soft cast shadow, coloured by
+accumulated equivalent shear strain. The scene script that once drove this module
+directly (an NCLaw bunny/dragon geometry-generalization render) lives in the research
+tree, and its dumps are not part of this repo.
 """
 from __future__ import annotations
 
