@@ -238,14 +238,14 @@ def render_recording(n_grid: int, workers: int = 0, render_max: int = RENDER_MAX
     return mp4
 
 
-def build_scene(device: str, n_grid: int, arm: PandaPour):
+def build_scene(device: str, n_grid: int, arm: PandaPour, sparse: bool = False):
     grid = GridConfig(n_grid=n_grid, grid_lim=GRID_LIM)
     h = grid.dx / 2
     cup_pos0, cup_quat0 = arm.cup_pose_at(0.0)
     pos_local, vol = cup_fill(PROFILE, h, fill_fraction=FILL_FRACTION)
     pos = (cup_pos0 + pos_local @ quat_to_mat(cup_quat0).T + WORLD_TO_MPM).astype(np.float32)
 
-    s = Solver(grid=grid, device=device).load_particles(pos, vol)
+    s = Solver(grid=grid, device=device, sparse=sparse).load_particles(pos, vol)
     s.set_material(newtonian(**HONEY))
     s.add_plane((0, 0, WORLD_TO_MPM[2]), (0, 0, 1), "separate", friction=0.3)
     s.add_domain_walls()
@@ -286,11 +286,11 @@ def level_volume(x_world, pos, quat, h: float) -> float:
 def run(device: str = "auto", n_grid: int = 192, video: bool = True,
         record: bool = False, rebake: bool = False, render_stride: int = 1,
         frames: int | None = None, render_workers: int = 0,
-        render_max: int = RENDER_MAX) -> dict:
+        render_max: int = RENDER_MAX, sparse: bool = False) -> dict:
     OUT.mkdir(parents=True, exist_ok=True)
     arm = make_arm(write_glass_obj(PROFILE, OUT / "glass_render.obj"))
 
-    s, grid, src, rcv, vol = build_scene(device, n_grid, arm)
+    s, grid, src, rcv, vol = build_scene(device, n_grid, arm, sparse=sparse)
     h = grid.dx / 2
     n0 = s.n_particles
     m_liq = float(HONEY["density"] * vol.sum())
@@ -516,6 +516,9 @@ if __name__ == "__main__":
                          "(0 = min(8, cpus); frames are independent)")
     ap.add_argument("--render-max", type=int, default=RENDER_MAX,
                     help=f"max particles drawn per frame (0 = all; default {RENDER_MAX})")
+    ap.add_argument("--sparse", action="store_true",
+                    help="active-block sparse grid compute (disables CUDA graph capture; "
+                         "A/B it against the default and WARPMPM_NO_CUDA_GRAPH=1)")
     args = ap.parse_args()
     if args.render_only:
         render_recording(96 if args.fast else args.n_grid,
@@ -524,4 +527,5 @@ if __name__ == "__main__":
         run(device=args.device, n_grid=96 if args.fast else args.n_grid,
             video=not args.skip_video and not args.record, record=args.record,
             rebake=args.rebake, frames=args.frames,
-            render_workers=args.render_workers, render_max=args.render_max)
+            render_workers=args.render_workers, render_max=args.render_max,
+            sparse=args.sparse)
