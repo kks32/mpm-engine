@@ -37,12 +37,12 @@ Original upstream contributors (from the fork's git history):
 - Zeshun Zong and the MultiPLES group (UCLA): the original solver and base materials.
 - supertan0204: the weakly-compressible fluid material.
 
-The upstream warp-mpm carries no license file (its README asks for citation), so the
-vendored core is included on the same terms it was released under, and the repository's
-MIT license (LICENSE) covers the group's own code: everything outside `kernels/`, plus
-the group's extensions listed below. The upstream-derived portions of `kernels/` remain
-under their authors' copyright until the upstream adds an explicit license; they are kept
-isolated in `kernels/` so the boundary stays clear.
+License boundary:
+
+- Upstream warp-mpm: no license file; its README asks for citation.
+- LICENSE (MIT) covers the group's code: everything outside `kernels/`, plus the group
+  extensions listed below.
+- Upstream-derived parts of `kernels/`: their authors' copyright.
 
 ## Group extensions (UT Austin) on top of that core
 
@@ -90,11 +90,17 @@ any adapted fragments are used with citation:
 
 ## Other reference codebases and inspirations
 
-Read as design references; no code copied from any of them:
+No code copied from any of these.
 
-- **GPUMPM** (github.com/kuiwuchn/GPUMPM), the SIGGRAPH Asia 2018 GPU MPM of Gao, Wang,
-  Wu et al.: the two-level sparse-block architecture behind our active-block compute.
-  GPLv3, so design only.
+- GPUMPM (github.com/kuiwuchn/GPUMPM), Gao et al., SIGGRAPH Asia 2018. GPLv3: design
+  only. Two-level sparse-block layout of the active-block compute.
+- PhysGaussian (github.com/XPandora/PhysGaussian), Xie et al., BibTeX above. No license
+  file: design only. The covariance hooks in `kernels/` serve this coupling.
+- GeoWarp. Reference for the planned implicit quasi-static solver. License unchecked.
+- Genesis (github.com/Genesis-Embodied-AI/Genesis), Apache-2.0. Scene geometry, poses,
+  and robot trajectory of the pour example.
+- NVIDIA Warp, Apache-2.0. Dependency.
+- MuJoCo, Apache-2.0. Dependency.
 
 ```bibtex
 @article{gao2018gpu,
@@ -106,14 +112,3 @@ Read as design references; no code copied from any of them:
   doi     = {10.1145/3272127.3275044}
 }
 ```
-
-- **PhysGaussian** (github.com/XPandora/PhysGaussian), Xie et al. (BibTeX above): the
-  Gaussian-splat coupling that the vendored kernels' covariance hooks serve. Published
-  without a license file; design reference only.
-- **GeoWarp**: the implicit quasi-static MPM solvers referenced for the planned implicit
-  path; its license will be checked before any porting, and this section updated then.
-- **Genesis** (github.com/Genesis-Embodied-AI/Genesis, Apache-2.0): the SPH simulator
-  running the companion pouring study that `examples/pour_franka.py` mirrors scene for
-  scene; only scene geometry, poses, and the robot trajectory were ported.
-- **NVIDIA Warp** (Apache-2.0) and **MuJoCo** (Apache-2.0) are dependencies, used through
-  their public APIs, not vendored.

@@ -105,9 +105,9 @@ subprocess (`--render-only`), with frames split across parallel workers.
 
 ## License, provenance, acknowledgments
 
-MIT ([LICENSE](LICENSE)) for the group's code. The vendored numerical core in
-`src/warpmpm/kernels/` derives from the upstream UCLA warp-mpm, which is published
-without a license file; see [AUTHORS.md](AUTHORS.md) for the exact boundary and terms.
+MIT ([LICENSE](LICENSE)) for the group's code. The vendored core in
+`src/warpmpm/kernels/` derives from the upstream UCLA warp-mpm (no license file
+upstream); boundary in [AUTHORS.md](AUTHORS.md).
 
 Full provenance with BibTeX in [AUTHORS.md](AUTHORS.md). In short:
 
