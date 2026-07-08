@@ -58,6 +58,7 @@ Layered onto the upstream solver by our group (from git authorship):
 
 Everything outside `kernels/` (the `Solver` wrapper, `Material` factory, `coupling/` backend,
 `adapters/` MuJoCo, scenes, examples, tests) is group-authored.
+
 ## Borrowed transfer-kernel design: claymore (MIT)
 
 The Step 5 transfer-pipeline optimizations (the fused G2P2G particle pass, per-block
@@ -86,3 +87,33 @@ any adapted fragments are used with citation:
   year   = {2023}
 }
 ```
+
+## Other reference codebases and inspirations
+
+Read as design references; no code copied from any of them:
+
+- **GPUMPM** (github.com/kuiwuchn/GPUMPM), the SIGGRAPH Asia 2018 GPU MPM of Gao, Wang,
+  Wu et al.: the two-level sparse-block architecture behind our active-block compute.
+  GPLv3, so design only.
+
+```bibtex
+@article{gao2018gpu,
+  author  = {Gao, Ming and Wang, Xinlei and Wu, Kui and Pradhana, Andre
+             and Sifakis, Eftychios and Yuksel, Cem and Jiang, Chenfanfu},
+  title   = {GPU Optimization of Material Point Methods},
+  journal = {ACM Transactions on Graphics},
+  volume  = {37}, number = {6}, year = {2018},
+  doi     = {10.1145/3272127.3275044}
+}
+```
+
+- **PhysGaussian** (github.com/XPandora/PhysGaussian), Xie et al. (BibTeX above): the
+  Gaussian-splat coupling that the vendored kernels' covariance hooks serve. Published
+  without a license file; design reference only.
+- **GeoWarp**: the implicit quasi-static MPM solvers referenced for the planned implicit
+  path; its license will be checked before any porting, and this section updated then.
+- **Genesis** (github.com/Genesis-Embodied-AI/Genesis, Apache-2.0): the SPH simulator
+  running the companion pouring study that `examples/pour_franka.py` mirrors scene for
+  scene; only scene geometry, poses, and the robot trajectory were ported.
+- **NVIDIA Warp** (Apache-2.0) and **MuJoCo** (Apache-2.0) are dependencies, used through
+  their public APIs, not vendored.
