@@ -158,6 +158,21 @@ is a no-op either way, which is why Steps 1 and 2 are testable on the Mac first.
    Python traceback.
 3. bench_step before and after on the GPU box; gate: existing suite green on CPU and GPU. DONE.
 
+192^3 pour A/B (Vista GH200, 340k particles, 432 substeps/frame, July 2026):
+graphs 787 / no-graphs 747 / sparse 749 ms sim per frame; physics identical to
+the particle. Reading: the substep is 1.7 to 1.8 ms of which ~90 percent is
+particle-side P2G/G2P (~6 ns per particle, consistent with the 96^3 scaling),
+so launch overhead (what graphs remove) and full-grid sweeps (what sparse and
+box restriction remove) are both small. Graphs are net NEGATIVE at this scale
+because capture bakes FULL-grid sweep dims while live mode uses the AABB
+restriction; and sparse == box restriction because the pour occupancy (cup +
+short stream) is a compact axis-aligned box, the documented case where the
+block list buys nothing over the AABB. Graphs still win 1.73x on small scenes
+where launches dominate. Consequence: kernel-side tuning at 192^3 is exhausted;
+the remaining levers are substep COUNT (implicit density projection, ~25x,
+Step 4) and, if particle work must shrink, claymore-style particle binning +
+shared-memory P2G (port the design only; GPUMPM is GPLv3).
+
 ## Regime coverage: which solver for which scene
 
 The implicit umbrella is three related solvers sharing grid DOFs, SDF-as-Dirichlet
