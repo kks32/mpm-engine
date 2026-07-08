@@ -132,9 +132,9 @@ def elastic(E: float = 1.0e5, nu: float = 0.3, density: float = 1000.0) -> Mater
 
 def vonmises(E: float = 5.0e5, nu: float = 0.3, yield_stress: float = 2.0e3,
              hardening_xi: float = 0.0, density: float = 1000.0) -> Material:
-    """von-Mises (J2) elasto-plastic solid -- the elastic shear modulus G=E/2(1+nu) sets the
+    """von-Mises (J2) elasto-plastic solid: the elastic shear modulus G=E/2(1+nu) sets the
     pre-yield stiffness, yield_stress sets the plastic flow threshold, xi the isotropic
-    hardening. It HOLDS a shape after the tool releases (true plasticity), the dough/plasticine
+    hardening. It holds a shape after the tool releases (true plasticity), the dough/plasticine
     analog used by RoboCraft/RoboCook. Identified by the convex weak-form solve as (G, yield)."""
     return Material(base="vonmises", E=E, nu=nu, yield_stress=yield_stress,
                     hardening_xi=hardening_xi, density=density)

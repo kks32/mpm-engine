@@ -131,7 +131,7 @@ class FrankaArm:
         """Read the wrist force-torque sensor (the load cell) for the reaction the dough
         exerts on the arm. The arm is held at descent fraction `frac` by its position
         actuators; we settle it with no load (baseline = the gripper's own weight) and with
-        the dough reaction `f_dough_world` applied to the hand, and return the DIFFERENCE --
+        the dough reaction `f_dough_world` applied to the hand, and return the difference,
         the dough's contribution at the wrist. By Newton's third law this equals the force we
         fed in (= the MPM grid-impulse reaction), now read at the wrist like a real robot.
         Requires ft_sensor=True. Uses forward dynamics, so it mutates the arm state."""
@@ -164,7 +164,7 @@ class FrankaArm:
         table=(cx,cy,z,half) draws a flat support box; boxes is a list of (center3, half3,
         rgba4) drawn as solid boxes (e.g. a plate mounted on the gripper); cylinders is a
         list of (center3, mat33 or None, radius, half_height, rgba4) drawn as (optionally
-        transparent) cylinders -- the glasses of the pouring scene. Subsample pts to fit
+        transparent) cylinders, the glasses of the pouring scene. Subsample pts to fit
         max_geom."""
         self.renderer.update_scene(self.data, self.cam)
         sc = self.renderer.scene
@@ -218,7 +218,7 @@ class FrankaArm:
 
 class PandaPour(FrankaArm):
     """Scripted Franka POUR kinematics + the cup grasp transform, ported 1:1 from the
-    Dogma95 Genesis pouring study (robotic_arm_pour_genesis.py) so the robot action and
+    companion Genesis (SPH) pouring study so the robot action and
     scene geometry are cross-comparable between the SPH and MPM simulators. FK is
     bit-identical between this Menagerie panda and Genesis's panda.xml (verified at the
     upright / 80% / full pour configs). The held glass's pose is the fixed handle-grasp
@@ -251,7 +251,8 @@ class PandaPour(FrankaArm):
         # optional render glasses: the watertight open-top mesh (write_glass_obj) is
         # added as an asset with two mocap bodies ("glass_src", "glass_rcv") so MuJoCo
         # draws the REAL glass geometry (thick base, filleted cavity) with glass-like
-        # transparency -- the Dogma95 look. Pose them per frame with set_glass_pose.
+        # transparency, matching the Genesis study's render. Pose them per frame
+        # with set_glass_pose.
         self._glass_mesh = None if glass_mesh is None else str(glass_mesh)
         self._glass_rgba = tuple(float(c) for c in glass_rgba)
         super().__init__(height=height, width=width, base_pos=self.BASE_POS,
@@ -319,7 +320,7 @@ class PandaPour(FrankaArm):
 
     def cup_pose_at(self, t: float):
         """World pose (pos, wxyz quat) of the held glass at time t: hand FK -> TCP ->
-        fixed handle-grasp transform (Dogma95 _cup_pose_from_grasp_tcp)."""
+        fixed handle-grasp transform (the Genesis study's _cup_pose_from_grasp_tcp)."""
         from warpmpm.colliders.glass import quat_from_mat, quat_to_mat
 
         self.set_time(t)

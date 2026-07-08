@@ -2,10 +2,10 @@
 
 One `GlassProfile` describes a pouring/receiving glass as a solid of revolution: an
 outer capped cylinder minus an inner cavity whose floor edge is filleted. The cavity is
-EXACTLY the fillet-radius dilation of a smaller capped cylinder, so the closed-form SDF
+exactly the fillet-radius dilation of a smaller capped cylinder, so the closed-form SDF
 here (numpy, the host reference) and its Warp twin in kernels/mpm_solver_warp.py stay in
-lockstep -- tests assert they agree. Geometry semantics and default numbers are ported
-from the Dogma95 Genesis pouring study (robotic_arm_pour_genesis.py) so the same pour is
+lockstep; tests assert they agree. Geometry semantics and default numbers are ported
+from the companion Genesis (SPH) pouring study so the same pour is
 cross-comparable between the SPH and MPM simulators.
 
 Local frame: z up, origin at the glass mid-height. The cavity floor sits at
@@ -107,7 +107,7 @@ def world_to_local(points, pos, quat) -> np.ndarray:
 
 @dataclass(frozen=True)
 class GlassProfile:
-    """Open-top glass as a solid of revolution (metres). Defaults = the Dogma95 glass:
+    """Open-top glass as a solid of revolution (metres). Defaults = the Genesis study's glass:
     outer 0.089 m, wall 0.020 m, height 0.24 m, 0.050 m base, 0.012 m floor fillet."""
 
     outer_radius: float = 0.089
@@ -170,8 +170,8 @@ def _capped_cylinder_sdf(r_xy, z, radius: float, z0: float, z1: float):
 
 
 def glass_sdf_local(points_local, profile: GlassProfile):
-    """Signed distance to the glass SOLID in the local frame (negative inside the
-    material). solid = capped outer cylinder MINUS the fillet-dilated cavity cylinder;
+    """Signed distance to the glass solid in the local frame (negative inside the
+    material). solid = capped outer cylinder minus the fillet-dilated cavity cylinder;
     the subtraction max(a, -b) is exact at the surface, which is all the BC needs."""
     p = np.asarray(points_local, dtype=np.float64)
     r_xy = np.linalg.norm(p[..., :2], axis=-1)
@@ -198,8 +198,8 @@ def glass_sdf(points_world, pos, quat, profile: GlassProfile):
 
 def cavity_mask(points_world, pos, quat, profile: GlassProfile,
                 pad: float = 0.0, brim_clearance: float = 0.0) -> np.ndarray:
-    """Points inside the open cavity below the rim -- the 'liquid held by this glass'
-    account (Dogma95 _glass_inner_mask semantics: `pad` loosens the radius, e.g. 0.75x
+    """Points inside the open cavity below the rim, the 'liquid held by this glass'
+    account (the Genesis study's _glass_inner_mask semantics: `pad` loosens the radius, e.g. 0.75x
     the particle spacing; `brim_clearance` trims the count band below the rim)."""
     local = world_to_local(points_world, pos, quat)
     r_xy = np.linalg.norm(local[:, :2], axis=1)
@@ -212,17 +212,17 @@ def cavity_mask(points_world, pos, quat, profile: GlassProfile,
 
 
 def solid_mask(points_world, pos, quat, profile: GlassProfile, tol: float = 0.0) -> np.ndarray:
-    """Leak audit: points embedded inside the glass MATERIAL by more than `tol`."""
+    """Leak audit: points embedded inside the glass material by more than `tol`."""
     return glass_sdf(points_world, pos, quat, profile) < -tol
 
 
 def project_out_of_solid(x, v, pos, quat, profile: GlassProfile, clearance: float = 0.0,
                          solid_velocity=None):
-    """Rescue net for boundary creep (the Dogma95 wall-correction, on the MPM side):
+    """Rescue net for boundary creep (the Genesis study's wall correction, on the MPM side):
     any particle embedded in the glass solid is moved along the SDF gradient back to
     `clearance` outside the surface, and the inward normal component of its velocity
-    RELATIVE to the local wall velocity is removed. The grid BC (contact band) makes
-    this rare; call once per control tick and log the count -- a growing count means
+    relative to the local wall velocity is removed. The grid BC (contact band) makes
+    this rare; call once per control tick and log the count: a growing count means
     the BC needs attention, not the net.
 
     x, v: (N,3) world positions/velocities (modified copies are returned).
@@ -275,7 +275,7 @@ def write_glass_obj(profile: GlassProfile, path, segments: int = 48,
                     fillet_segments: int = 8):
     """Write the watertight open-top glass render mesh (OBJ, triangles, outward
     winding): outer wall, rim annulus, inner wall, filleted cavity floor, bottom cap --
-    the same topology as the Dogma95 _write_glass_mesh, so the two simulators render
+    the same topology as the Genesis study's _write_glass_mesh, so the two simulators render
     the same glass. Pure numpy (no trimesh). Local frame = the SDF/collider frame."""
     from pathlib import Path
 
@@ -339,7 +339,8 @@ def cup_fill(profile: GlassProfile, h: float, fill_fraction: float = 0.80,
              clearance: float | None = None, floor_clearance: float | None = None,
              brim_clearance: float = 0.006, seed: int = 0):
     """Jittered particle lattice filling the cavity to `fill_fraction` of its usable
-    height (Dogma95 fill semantics: usable = rim - floor - brim/floor clearances). An MPM
+    height (the Genesis study's fill semantics: usable = rim - floor - brim/floor
+    clearances). An MPM
     lattice at rest density needs no settle-overfill calibration. Returns
     (pos_local[N,3] float32, vol[N] float32); place with x_world = pos + R(quat) @ x_local.
     h is the lattice spacing (grid.dx / ppc)."""

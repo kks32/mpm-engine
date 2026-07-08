@@ -7,12 +7,12 @@ Each is
     w_{abc}(x, z, t) = curl_xz( eta_a(x) eta_b(z) eta_c(t) e_y )
                      = ( -B_a(x) B'_b(z), +B'_a(x) B_b(z) ) * B_c(t)
 
-with B_a, B_b LOCAL cubic streamfunction B-splines (compact over a few cells)
-and B_c a LOCAL cubic temporal B-spline. Divergence free by construction (so a
-pressure closure can stand in -- the pressure term drops). COMPACT in space AND
+with B_a, B_b local cubic streamfunction B-splines (compact over a few cells)
+and B_c a local cubic temporal B-spline. Divergence free by construction (so a
+pressure closure can stand in; the pressure term drops). Compact in space and
 time (the temporal factor is what my earlier global-spatial attempt lacked: a
 time-constant test function makes the time-weak load cancel over the moving
-flowing region). Only INTERIOR (a, b, c) are kept (support inside the
+flowing region). Only interior (a, b, c) are kept (support inside the
 space-time flowing region), the analogue of EUCLID's free DoFs.
 
 Space-time separability factorizes the assembly: spatial integrands are formed

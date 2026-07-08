@@ -394,7 +394,7 @@ def mu_i_tabulated_return_mapping(
     # Pouliquen formula mu_s + dmu I/(I+I0). This lets an NN-EUCLID- (or FE-) recovered
     # mu(I) curve be re-simulated directly. The mu-table is stored in model.eta_table
     # (re-used; a granular tabulated material and a viscous tabulated material are never
-    # active in the same run). Everything else -- pressure, bisection, stress -- matches
+    # active in the same run). Everything else (pressure, bisection, stress) matches
     # material 9 exactly, so the only difference is the source of mu(I).
     U = wp.mat33(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
     V = wp.mat33(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
@@ -482,9 +482,9 @@ def j_cs_of_I(model: MPMModelStruct, mat: int, I: float):
 def mu_i_phi_pressure(model: MPMModelStruct, mat: int, J: float, Jp_ref: float):
     # compaction pressure from the elastic compression relative to the (slowly
     # relaxing) stress-free reference volume Jp_ref: p = K (Jp_ref/J - 1)_+ . This is
-    # the elastic EOS shifted by the critical-state reference, so it is SMOOTH and
-    # MONOTONE in J (stable, like the mu(I) elastic EOS) and the rate dependence
-    # enters only through the slow drift of Jp_ref -- not an instantaneous I feedback.
+    # the elastic EOS shifted by the critical-state reference, so it is smooth and
+    # monotone in J (stable, like the mu(I) elastic EOS) and the rate dependence
+    # enters only through the slow drift of Jp_ref, never an instantaneous I feedback.
     K = model.E[mat] / (3.0 * (1.0 - 2.0 * model.nu[mat]))
     p = K * (Jp_ref / wp.max(J, 1e-6) - 1.0)
     return wp.max(p, 0.0)
@@ -497,8 +497,8 @@ def mu_i_phi_return_mapping(
     # Compressible mu(I)-Phi(I) (TrackEUCLID, material 11). Deviatoric mu(I) yield
     # against the COMPACTION pressure p = K(Phi/Phi_c(I)-1)_+ (not the elastic EOS),
     # so the solid fraction relaxes toward the rate-dependent critical state Phi_c(I)
-    # under a free surface -- an emergent O(chi) observable density signal. The
-    # volumetric strain is PRESERVED in the return (the volume is physical, set by the
+    # under a free surface, an emergent O(chi) observable density signal. The
+    # volumetric strain is preserved in the return (the volume is physical, set by the
     # flow); the pressure comes from Phi via the compaction law, applied in the stress.
     # The realized inertial number I is stored in particle_Jp for the stress and the
     # next step's Phi_c lag.

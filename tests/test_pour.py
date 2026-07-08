@@ -17,7 +17,7 @@ from warpmpm.colliders.glass import (
     solid_mask,
 )
 
-PROF = GlassProfile()  # the Dogma95 glass, true scale
+PROF = GlassProfile()  # the Genesis study's glass, true scale
 Q_ID = (1.0, 0.0, 0.0, 0.0)
 
 

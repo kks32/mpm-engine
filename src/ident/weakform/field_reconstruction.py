@@ -1,7 +1,7 @@
 """Streamfunction B-spline velocity-field reconstruction (MATH_REFERENCE 6.5).
 
 For perceived/scattered kinematics (CoTracker3 tracks, or oracle particles) we
-reconstruct a SMOOTH, divergence-free in-plane velocity field by fitting a
+reconstruct a smooth, divergence-free in-plane velocity field by fitting a
 streamfunction psi(x, z) on a tensor cubic B-spline grid:
 
     v = curl(psi e_y):   v_x = -d psi/d z,   v_z = +d psi/d x
@@ -14,8 +14,8 @@ rate of deformation D = sym(grad v) exactly:
     dv_x/dx = -psi_xz,  dv_x/dz = -psi_zz,  dv_z/dx = psi_xx,  dv_z/dz = psi_xz
 
 (so dv_x/dx + dv_z/dz = 0). Evaluating the weak form on this smooth field by
-DENSE quadrature avoids the particle-scatter quadrature bias that the
-grid-consistent assembly was built to dodge -- the smooth field plus regular
+dense quadrature avoids the particle-scatter quadrature bias that the
+grid-consistent assembly was built to dodge; the smooth field plus regular
 quadrature is the G0 regime. This is the engine the G3 rendered-video closure
 feeds; here it is validated on oracle kinematics first.
 

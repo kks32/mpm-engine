@@ -195,7 +195,7 @@ class Solver:
         """Newton-exact reaction wrench the material exerts on a cup collider, from the
         grid impulse accumulated since the last reset over elapsed time dt: force[3] and
         torque[3] (about the cup centre). A static cup holding m kg of settled liquid
-        reads force ~ (0, 0, -m*g) -- the liquid's weight pressing on the glass."""
+        reads force ~ (0, 0, -m*g), the liquid's weight pressing on the glass."""
         p = self._sim.collider_params[handle]
         return {
             "force": np.asarray(p.force.numpy()[0], dtype=float) / dt,

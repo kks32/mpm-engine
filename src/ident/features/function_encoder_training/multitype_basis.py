@@ -1,11 +1,11 @@
-"""Multi-type function-encoder basis: can ONE learned basis span many material families?
+"""Multi-type function-encoder basis: can one learned basis span many material families?
 
-We represent every material -- elastic, plastic, viscous, granular -- by its STRESS RESPONSE
-over a canonical PROBE BATTERY (four blocks), giving a universal fixed-length fingerprint:
+We represent every material (elastic, plastic, viscous, granular) by its stress response
+over a canonical probe battery (four blocks), giving a universal fixed-length fingerprint:
 
   vol(J)        volumetric stress vs J          (bulk / compressibility)
   shear(gamma)  dev stress vs simple-shear      (elastic shear modulus; plastic yield plateau)
-  rate(gdot)    dev stress vs shear RATE        (viscosity / rate dependence)
+  rate(gdot)    dev stress vs shear rate        (viscosity / rate dependence)
   fric(I)       mu(I) vs inertial number        (granular friction)
 
 Each family lights up a different subset of blocks with a different shape, so a material is a
@@ -14,7 +14,7 @@ the fingerprint corpus, and learn a single basis (weighted SVD). We report (a) h
 dimensions span all types to a tolerance, (b) held-out reconstruction error, (c) whether the
 types separate in coefficient space (nearest-centroid classification).
 
-This is the offline "space of possible solutions" over MANY material types. At recovery time the
+This is the offline "space of possible solutions" over many material types. At recovery time the
 weak-form solve constrains only the blocks the loading excited (coverage); the rest are filled by
 the basis prior or refused.
 
@@ -148,7 +148,7 @@ def main():
 
 def figure():
     """Approximation-bound figure: the FE basis truncation error over 17 material types is the
-    SVD tail epsilon_approx(K)^2 = sum_{k>K} s_k^2 -- a hard, computable bound. Plot the singular
+    SVD tail epsilon_approx(K)^2 = sum_{k>K} s_k^2, a hard, computable bound. Plot the singular
     spectrum and the held-out reconstruction error vs K."""
     import matplotlib
     matplotlib.use("Agg")
@@ -185,9 +185,9 @@ def figure():
 
 
 def _oof_fingerprints(n=60, seed=7):
-    """Laws that look admissible but are OUTSIDE the corpus family (the refusal targets):
-    velocity-WEAKENING friction (mu decreasing in I), non-monotone (bumped) viscosity, an
-    oscillatory friction law, and a rate+friction HYBRID no single family has."""
+    """Laws that look admissible but are outside the corpus family (the refusal targets):
+    velocity-weakening friction (mu decreasing in I), non-monotone (bumped) viscosity, an
+    oscillatory friction law, and a rate+friction hybrid no single family has."""
     rng = np.random.default_rng(seed)
     X = []
     for _ in range(n):
@@ -203,7 +203,7 @@ def _oof_fingerprints(n=60, seed=7):
         elif kind == 2:                                 # oscillatory friction
             fric = (rng.uniform(0.3, 0.5) + 0.15 * np.sin(4 * np.log10(I_GRID))) * P_REF
             X.append(np.concatenate([_vol(K) * 0.3, Z(NG), Z(NR), fric]))
-        else:                                           # hybrid: strong rate AND friction blocks
+        else:                                           # hybrid: strong rate and friction blocks
             X.append(np.concatenate([_vol(K), Z(NG),
                                      _rate(10.0 ** rng.uniform(0, 2), 0, 0, 1),
                                      _fric(rng.uniform(0.2, 0.45), rng.uniform(0.1, 0.5), 10.0 ** rng.uniform(-2, 0))]))
@@ -212,7 +212,7 @@ def _oof_fingerprints(n=60, seed=7):
 
 def out_of_family():
     """Refusal demo: the FE-basis projection residual (distance to subspace, Bound 1) separates
-    IN-family held-out laws from OUT-of-family laws -> a refusal/abstention gate."""
+    in-family held-out laws from out-of-family laws -> a refusal/abstention gate."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt

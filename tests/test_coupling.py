@@ -1,5 +1,5 @@
 """Two-way coupling tests: the force controllers, the backend contract, and the load-bearing
-property -- a force-regulated press into firm dough HALTS on the dough and never reaches the
+property that a force-regulated press into firm dough halts on the dough and never reaches the
 floor (the reaction force, not a scripted endpoint, decides the stopping depth)."""
 from __future__ import annotations
 
@@ -83,7 +83,7 @@ def test_backend_press_gives_compressive_reaction():
 @pytest.mark.slow
 def test_two_way_press_halts_above_floor():
     # the load-bearing two-way property: a force-regulated descent into firm dough reaches
-    # its target force and HALTS, with the box bottom comfortably above the floor -- the
+    # its target force and halts, with the box bottom comfortably above the floor; the
     # dough stops it, not the safety clamp.
     backend, grid, floor, ds = _press_backend(n_grid=40)
     cx = cy = grid.grid_lim * 0.5

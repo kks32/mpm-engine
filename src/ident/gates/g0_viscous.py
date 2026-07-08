@@ -1,6 +1,6 @@
 """G0-style manufactured proof of generality: viscous and viscoplastic laws.
 
-Demonstrates that the SAME linear-in-theta weak form identifies a Newtonian
+Demonstrates that the same linear-in-theta weak form identifies a Newtonian
 viscosity and a Bingham (yield-stress + viscosity) rheology, exactly as it
 identifies the granular mu(I). The constitutive stress is written as a sum of
 known tensor bases linear in the unknowns:
@@ -8,10 +8,10 @@ known tensor bases linear in the unknowns:
   Newtonian:  tau = eta * (2D)                          -> theta = (eta,)
   Bingham:    tau = tau_y * (2D/|gd|_eps) + eta * (2D)  -> theta = (tau_y, eta)
 
-KEY REUSE (no new quadrature code): the G0-verified assemble_system computes
+Key reuse (no new quadrature code): the G0-verified assemble_system computes
 A[j] = INT vol * p * (2D/|gd|_eps):D[w] * phi(I). With ConstantDict (phi=1):
-  - p = 1        gives the YIELD basis   INT (2D/|gd|):D[w]   (coeff tau_y)
-  - p = |gd|_eps gives the VISCOUS basis INT (2D):D[w]        (coeff eta)
+  - p = 1        gives the yield basis   INT (2D/|gd|):D[w]   (coeff tau_y)
+  - p = |gd|_eps gives the viscous basis INT (2D):D[w]        (coeff eta)
 so the two basis columns are reweightings of the same verified integrand. The
 load b is the balance-completing manufactured force (independent of the basis),
 identical to G0. Divergence-free bump test functions kill the pressure, so the
@@ -125,10 +125,10 @@ def run_law(tau_y, eta, columns, label, refinements, t_end=0.4):
     flip_err = float(np.linalg.norm(res_flip.theta - theta_true) /
                      max(np.linalg.norm(theta_true), 1e-30))
 
-    # Two acceptable regimes: (a) ALREADY EXACT -- a law that is linear and
+    # Two acceptable regimes: (a) already exact: a law that is linear and
     # smooth in the kinematics (e.g. Newtonian eta*2D) is recovered to the FD
     # div-sigma floor at every resolution, so the error is flat at ~1e-4 with no
-    # quadrature slope; (b) QUADRATURE-LIMITED -- a law with the near-singular
+    # quadrature slope; (b) quadrature-limited: a law with the near-singular
     # 2D/|gd| yield term (Bingham) has a genuine convergence rate. Require
     # accuracy in both, and a real rate only when not already exact.
     exact = errs[-1] < 1.0e-3
@@ -154,7 +154,7 @@ def run_gate(out_dir="out/g0_viscous", quick=False):
 
     newtonian = run_law(0.0, 60.0, columns=[1], label="Newtonian eta=60",
                         refinements=refinements)
-    # also fit the Newtonian data with BOTH columns: tau_y must come out ~0
+    # also fit the Newtonian data with both columns: tau_y must come out ~0
     cfg = ManufacturedConfig(unsteady=True); fields = ViscousFields(cfg, 0.0, 60.0)
     rows = default_rows(0.4)
     A, b = _design(build_frames(fields, refinements[-1][0], refinements[-1][1], 0.4), rows)

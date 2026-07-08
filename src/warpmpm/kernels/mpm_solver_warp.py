@@ -38,7 +38,7 @@ def capped_cylinder_sdf(r_xy: float, z: float, radius: float, z0: float, z1: flo
 def revolved_glass_sdf(local: wp.vec3, param: RevolvedCollider) -> float:
     # open-top glass SOLID = outer capped cylinder MINUS the fillet-dilated cavity
     # cylinder (cavity extended above the rim so the top is open). Twin of the numpy
-    # reference in colliders/glass.py:glass_sdf_local -- keep the two in lockstep.
+    # reference in colliders/glass.py:glass_sdf_local; keep the two in lockstep.
     r_xy = wp.sqrt(local[0] * local[0] + local[1] * local[1])
     d_outer = capped_cylinder_sdf(
         r_xy, local[2], param.outer_radius, -param.half_height, param.half_height
@@ -1815,7 +1815,7 @@ class MPM_Simulator_WARP:
     # fillet-dilated cavity) at a 6-DoF pose (point, rot), imposing its rigid velocity
     # field v + omega x r on the grid nodes inside the solid. Within sticky_depth of the
     # surface the BC is a SEPARABLE Coulomb-friction contact on the RELATIVE velocity
-    # (liquid may slide along and detach from the wall -- essential for pouring); deeper
+    # (liquid may slide along and detach from the wall, which pouring requires); deeper
     # nodes get the full solid velocity, an anti-tunneling backstop no resolved flow
     # should reach (the wall is >= 3 cells thick at the intended resolutions). Every
     # substep the kernel accumulates the exact reaction impulse m*(v_free - v_imposed)

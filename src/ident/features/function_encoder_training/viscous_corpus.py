@@ -7,9 +7,9 @@ viscoplastic apparent viscosities eta_app(gd) on s = log10 gd in [-1, 2]
 The yield 1/gd divergence is regularized (eps) so eta_app is bounded, matching
 the simulator's kirchoff_stress_newtonian. The weak-form viscous basis multiplies
 eta_app(gd), so the learned Phi_k(gd) spans these shapes and the linear solve
-recovers eta_app(gd) = sum_k theta_k Phi_k(gd) -- the viscous analogue of mu(I).
+recovers eta_app(gd) = sum_k theta_k Phi_k(gd), the viscous analogue of mu(I).
 
-Each law is normalized to unit weighted L2 on the s-grid: the basis spans SHAPES;
+Each law is normalized to unit weighted L2 on the s-grid: the basis spans shapes;
 magnitude is carried by theta at solve time. Pure numpy.
 """
 from __future__ import annotations

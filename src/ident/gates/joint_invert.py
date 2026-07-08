@@ -3,10 +3,10 @@
 A single collapse, identified by the divergence-free continuum weak form on a
 reconstructed field, is patch-scale biased (mu rises with patch radius and
 crosses the truth at an r/H-dependent scale). The methodology's remedy is
-JOINT multi-aspect-ratio inversion: stack the weak-form rows from collapses at
-DIFFERENT aspect ratios (different column height H, hence different r/H and
-different I coverage) into ONE linear system, so a single mu(I) must satisfy
-all geometries at once -- breaking the per-geometry scale degeneracy. Combined
+joint multi-aspect-ratio inversion: stack the weak-form rows from collapses at
+different aspect ratios (different column height H, hence different r/H and
+different I coverage) into one linear system, so a single mu(I) must satisfy
+all geometries at once, breaking the per-geometry scale degeneracy. Combined
 with multi-scale patches (full/half/offset per patch) and I-stratified
 placement.
 
@@ -73,7 +73,7 @@ def joint_invert(dump_paths, dictionary: Dictionary | None = None,
             continue
         A, b, Iobs = res
         # per-aspect normalization: scale rows so each collapse contributes
-        # EQUALLY to the joint normal equations (otherwise the largest /
+        # equally to the joint normal equations (otherwise the largest /
         # most-energetic collapse dominates and reimposes its own scale bias).
         s = np.linalg.norm(A) + 1e-30
         A_all.append(A); b_all.append(b); A_norm.append((A / s, b / s))

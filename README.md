@@ -1,8 +1,9 @@
 # warpmpm
 
-A modular **Warp-MPM** engine for robot manipulation of **deformable and granular media**:
-dough pressing and shaping, glass-to-glass pouring, granular flows. Couples to **MuJoCo now**
-and is built for **NVIDIA Isaac Lab later** (Warp to PyTorch is zero-copy on CUDA).
+A modular Warp MPM engine for robot manipulation of deformable and granular media:
+dough pressing and shaping, glass-to-glass pouring, granular flows. It couples to
+MuJoCo today and is built with NVIDIA Isaac Lab in mind (Warp to PyTorch is zero-copy
+on CUDA).
 
 The core is the validated warp-mpm fork (bit-for-bit the kernels behind the TrackEUCLID
 results) wrapped behind a small typed `Solver`, with a heavily optimized explicit MLS/APIC
@@ -42,9 +43,12 @@ What exists:
   composite offscreen rendering of arm + glasses + particles.
 - `src/ident/`, `src/common/`: the warp-free EUCLID identification stack (weak-form
   constitutive recovery); an import-boundary test keeps it free of warp/torch.
-- `examples/`: `pour_franka.py` (the Genesis-twin honey pour with metrics, leak audit,
-  and a record/render split for GPU clusters), dough press and gripper shaping,
-  `recovery/` (elastic/plastic drop parameter recovery), and more.
+- `examples/`: one curated demo per capability (pour, force-feedback press, gripper
+  shaping, squeeze identification, wrist-FT cross-check, shear-cell rheology, surface
+  render), sharing helpers through `examples/common.py`; `examples/recovery/` holds
+  the constitutive-recovery examples. See `examples/README.md`.
+- `experiments/`: the paper studies and figure scripts, kept runnable for
+  reproducibility and mapped to the results they produce in `experiments/README.md`.
 
 ## Performance
 
