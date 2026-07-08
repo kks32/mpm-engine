@@ -689,67 +689,72 @@ def update_cov(state: MPMStateStruct, p: int, grad_v: wp.mat33, dt: float):
     state.particle_cov[p * 6 + 5] = cov_np1[2, 2]
 
 
-@wp.kernel
-def p2g_apic_with_stress(state: MPMStateStruct, model: MPMModelStruct, dt: float):
+@wp.func
+def p2g_particle(state: MPMStateStruct, model: MPMModelStruct, dt: float, p: int):
     # input given to p2g:   particle_stress
     #                       particle_x
     #                       particle_v
     #                       particle_C
+    stress = state.particle_stress[p]
+    grid_pos = state.particle_x[p] * model.inv_dx
+    base_pos_x = wp.int(grid_pos[0] - 0.5)
+    base_pos_y = wp.int(grid_pos[1] - 0.5)
+    base_pos_z = wp.int(grid_pos[2] - 0.5)
+    fx = grid_pos - wp.vec3(
+        wp.float(base_pos_x), wp.float(base_pos_y), wp.float(base_pos_z)
+    )
+    wa = wp.vec3(1.5) - fx
+    wb = fx - wp.vec3(1.0)
+    wc = fx - wp.vec3(0.5)
+    w = wp.matrix_from_cols(
+        wp.cw_mul(wa, wa) * 0.5,
+        wp.vec3(0.0, 0.0, 0.0) - wp.cw_mul(wb, wb) + wp.vec3(0.75),
+        wp.cw_mul(wc, wc) * 0.5,
+    )
+    dw = wp.matrix_from_cols(
+        fx - wp.vec3(1.5),
+        -2.0 * (fx - wp.vec3(1.0)),
+        fx - wp.vec3(0.5),
+    )
+
+    for i in range(0, 3):
+        for j in range(0, 3):
+            for k in range(0, 3):
+                dpos = (
+                    wp.vec3(wp.float(i), wp.float(j), wp.float(k)) - fx
+                ) * model.dx
+                ix = base_pos_x + i
+                iy = base_pos_y + j
+                iz = base_pos_z + k
+                weight = w[0, i] * w[1, j] * w[2, k]  # tricubic interpolation
+                dweight = compute_dweight(model, w, dw, i, j, k)
+                C = state.particle_C[p]
+                # if model.rpic = 0, standard apic
+                C = (1.0 - model.rpic_damping) * C + model.rpic_damping / 2.0 * (
+                    C - wp.transpose(C)
+                )
+                if model.rpic_damping < -0.001:
+                    # standard pic
+                    C = wp.mat33(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+
+                elastic_force = -state.particle_vol[p] * stress * dweight
+                v_in_add = (
+                    weight
+                    * state.particle_mass[p]
+                    * (state.particle_v[p] + C * dpos)
+                    + dt * elastic_force
+                )
+                wp.atomic_add(state.grid_v_in, ix, iy, iz, v_in_add)
+                wp.atomic_add(
+                    state.grid_m, ix, iy, iz, weight * state.particle_mass[p]
+                )
+
+
+@wp.kernel
+def p2g_apic_with_stress(state: MPMStateStruct, model: MPMModelStruct, dt: float):
     p = wp.tid()
     if state.particle_selection[p] == 0:
-        stress = state.particle_stress[p]
-        grid_pos = state.particle_x[p] * model.inv_dx
-        base_pos_x = wp.int(grid_pos[0] - 0.5)
-        base_pos_y = wp.int(grid_pos[1] - 0.5)
-        base_pos_z = wp.int(grid_pos[2] - 0.5)
-        fx = grid_pos - wp.vec3(
-            wp.float(base_pos_x), wp.float(base_pos_y), wp.float(base_pos_z)
-        )
-        wa = wp.vec3(1.5) - fx
-        wb = fx - wp.vec3(1.0)
-        wc = fx - wp.vec3(0.5)
-        w = wp.matrix_from_cols(
-            wp.cw_mul(wa, wa) * 0.5,
-            wp.vec3(0.0, 0.0, 0.0) - wp.cw_mul(wb, wb) + wp.vec3(0.75),
-            wp.cw_mul(wc, wc) * 0.5,
-        )
-        dw = wp.matrix_from_cols(
-            fx - wp.vec3(1.5),
-            -2.0 * (fx - wp.vec3(1.0)),
-            fx - wp.vec3(0.5),
-        )
-
-        for i in range(0, 3):
-            for j in range(0, 3):
-                for k in range(0, 3):
-                    dpos = (
-                        wp.vec3(wp.float(i), wp.float(j), wp.float(k)) - fx
-                    ) * model.dx
-                    ix = base_pos_x + i
-                    iy = base_pos_y + j
-                    iz = base_pos_z + k
-                    weight = w[0, i] * w[1, j] * w[2, k]  # tricubic interpolation
-                    dweight = compute_dweight(model, w, dw, i, j, k)
-                    C = state.particle_C[p]
-                    # if model.rpic = 0, standard apic
-                    C = (1.0 - model.rpic_damping) * C + model.rpic_damping / 2.0 * (
-                        C - wp.transpose(C)
-                    )
-                    if model.rpic_damping < -0.001:
-                        # standard pic
-                        C = wp.mat33(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
-
-                    elastic_force = -state.particle_vol[p] * stress * dweight
-                    v_in_add = (
-                        weight
-                        * state.particle_mass[p]
-                        * (state.particle_v[p] + C * dpos)
-                        + dt * elastic_force
-                    )
-                    wp.atomic_add(state.grid_v_in, ix, iy, iz, v_in_add)
-                    wp.atomic_add(
-                        state.grid_m, ix, iy, iz, weight * state.particle_mass[p]
-                    )
+        p2g_particle(state, model, dt, p)
 
 
 # add gravity
@@ -770,12 +775,9 @@ def grid_normalization_and_gravity(
         state.grid_v_out[grid_x, grid_y, grid_z] = v_out
 
 
-@wp.kernel
-def g2p(state: MPMStateStruct, model: MPMModelStruct, dt: float):
-    p = wp.tid()
-    if state.particle_selection[p] == 0:
-        if state.particle_material[p] == 7 or state.particle_material[p] == 8:  # stationary/rigid handled separately
-            return
+@wp.func
+def g2p_particle(state: MPMStateStruct, model: MPMModelStruct, dt: float, p: int):
+    if True:
         grid_pos = state.particle_x[p] * model.inv_dx
         base_pos_x = wp.int(grid_pos[0] - 0.5)
         base_pos_y = wp.int(grid_pos[1] - 0.5)
@@ -829,13 +831,19 @@ def g2p(state: MPMStateStruct, model: MPMModelStruct, dt: float):
             update_cov(state, p, new_F, dt)
 
 
-# compute (Kirchhoff) stress = stress(returnMap(F_trial))
 @wp.kernel
-def compute_stress_from_F_trial(
-    state: MPMStateStruct, model: MPMModelStruct, dt: float
-):
+def g2p(state: MPMStateStruct, model: MPMModelStruct, dt: float):
     p = wp.tid()
     if state.particle_selection[p] == 0:
+        if state.particle_material[p] == 7 or state.particle_material[p] == 8:  # stationary/rigid handled separately
+            return
+        g2p_particle(state, model, dt, p)
+
+
+# compute (Kirchhoff) stress = stress(returnMap(F_trial))
+@wp.func
+def stress_update_particle(state: MPMStateStruct, model: MPMModelStruct, dt: float, p: int):
+    if True:
         mat = state.particle_material[p]
 
         # apply return mapping
@@ -931,6 +939,59 @@ def compute_stress_from_F_trial(
 
         stress = (stress + wp.transpose(stress)) / 2.0  # enfore symmetry
         state.particle_stress[p] = stress
+
+
+@wp.kernel
+def compute_stress_from_F_trial(
+    state: MPMStateStruct, model: MPMModelStruct, dt: float
+):
+    p = wp.tid()
+    if state.particle_selection[p] == 0:
+        stress_update_particle(state, model, dt, p)
+
+
+@wp.kernel
+def g2p_stress_p2g(state: MPMStateStruct, model: MPMModelStruct, dt: float):
+    """Claymore-style fused particle pass (Wang et al., ACM TOG 2020, MIT; see
+    docs/claymore_notes.md and AUTHORS.md): gather from grid state n (grid_v_out),
+    advect and update F_trial, return-map to stress, and scatter substep n+1's
+    momentum/mass into the freshly zeroed grid_v_in/grid_m -- one read and one write
+    of the particle arrays per substep instead of three passes. Reads (grid_v_out)
+    and writes (grid_v_in, grid_m) are disjoint arrays, and all three stages for a
+    particle touch only that particle's state, so per-particle arithmetic order is
+    identical to the separate kernels (bitwise on CPU). Gating mirrors the originals:
+    stationary/rigid (7, 8) skip the gather but still return-map and scatter."""
+    p = wp.tid()
+    if state.particle_selection[p] == 0:
+        mat = state.particle_material[p]
+        if mat != 7 and mat != 8:
+            g2p_particle(state, model, dt, p)
+        stress_update_particle(state, model, dt, p)
+        p2g_particle(state, model, dt, p)
+
+
+@wp.kernel
+def zero_grid_m_vin(state: MPMStateStruct, model: MPMModelStruct, lo: wp.vec3i):
+    """Split zero, part 1 (fused pipeline): clear the scatter targets BEFORE the fused
+    kernel; grid_v_out must survive it (the fused gather reads state n from there)."""
+    grid_x, grid_y, grid_z = wp.tid()
+    grid_x = grid_x + lo[0]
+    grid_y = grid_y + lo[1]
+    grid_z = grid_z + lo[2]
+    state.grid_m[grid_x, grid_y, grid_z] = 0.0
+    state.grid_v_in[grid_x, grid_y, grid_z] = wp.vec3(0.0, 0.0, 0.0)
+
+
+@wp.kernel
+def zero_grid_vout(state: MPMStateStruct, model: MPMModelStruct, lo: wp.vec3i):
+    """Split zero, part 2: AFTER the fused gather, clear grid_v_out so sub-threshold
+    stencil nodes (mass <= 1e-15, skipped by normalization) read exactly zero, matching
+    the unfused pipeline bitwise."""
+    grid_x, grid_y, grid_z = wp.tid()
+    grid_x = grid_x + lo[0]
+    grid_y = grid_y + lo[1]
+    grid_z = grid_z + lo[2]
+    state.grid_v_out[grid_x, grid_y, grid_z] = wp.vec3(0.0, 0.0, 0.0)
 
 
 @wp.kernel

@@ -1047,7 +1047,28 @@ class MPM_Simulator_WARP:
                         device=device,
                     )
 
-        # apply BC on grid (profiled per collider: BC[k]:<struct> rows in time_profile)
+        self._apply_grid_bc(dt, grid_size, device)
+
+        # g2p
+        with wp.ScopedTimer(
+            "g2p", synchronize=self.profile, active=self.profile, print=False, dict=self.time_profile
+        ):
+            if use_graph:
+                wp.capture_launch(self._graph_B)
+            else:
+                wp.launch(
+                    kernel=g2p,
+                    dim=self.n_particles,
+                    inputs=[self.mpm_state, self.mpm_model, dt],
+                    device=device,
+                )  # x, v, C, F_trial are updated
+
+        self._p2g2p_tail(dt, device)
+
+    def _apply_grid_bc(self, dt, grid_size, device):
+        """Grid boundary conditions: one (AABB-restricted, profiled) launch per
+        collider, then its host-side pose integration. Shared by the normal and
+        fused substep pipelines."""
         for k in range(len(self.grid_postprocess)):
             # restrict the launch to the collider's current grid box when it has one;
             # a None box means the collider is outside the domain (skip the launch but
@@ -1086,20 +1107,8 @@ class MPM_Simulator_WARP:
             if self.modify_bc[k] is not None:
                 self.modify_bc[k](self.time, dt, self.collider_params[k])
 
-        # g2p
-        with wp.ScopedTimer(
-            "g2p", synchronize=self.profile, active=self.profile, print=False, dict=self.time_profile
-        ):
-            if use_graph:
-                wp.capture_launch(self._graph_B)
-            else:
-                wp.launch(
-                    kernel=g2p,
-                    dim=self.n_particles,
-                    inputs=[self.mpm_state, self.mpm_model, dt],
-                    device=device,
-                )  # x, v, C, F_trial are updated
-
+    def _p2g2p_tail(self, dt, device):
+        """Rigid-body update + time advance (shared by both substep pipelines)."""
         # rigid body step (skipped when no rigid bodies are present)
         if self.n_rigid_bodies > 0:
             with wp.ScopedTimer("rigid_body", synchronize=self.profile, active=self.profile, print=False, dict=self.time_profile):
@@ -1139,7 +1148,109 @@ class MPM_Simulator_WARP:
         #### CFL check ####
         self.time = self.time + dt
 
-    # set particle densities to all_particle_densities, 
+    def p2g2p_fused_tick(self, dt, substeps, device="cuda:0"):
+        """Claymore-fused control tick (Wang et al. TOG 2020, MIT; docs/claymore_notes.md):
+        the interior substeps run ONE fused particle pass (g2p_stress_p2g) instead of the
+        three separate stress/p2g/g2p passes, so a tick costs S+1 particle passes instead
+        of 3S. The grid double buffer makes this safe: the fused gather reads grid_v_out
+        (state n) while scattering into the freshly zeroed grid_v_in/grid_m (state n+1).
+        The split zero is load-bearing for bitwise equality with p2g2p: grid_m/grid_v_in
+        clear BEFORE the fused pass, grid_v_out clears AFTER it (normalization skips
+        nodes with mass <= 1e-15, which must then read exactly zero in the next gather).
+        Caller (Solver.step) guarantees: no pre-p2g ops, no velocity modifiers, no rigid
+        bodies, sparse mode off. Runs live (no CUDA graph capture in v1)."""
+        grid_size = (
+            self.mpm_model.grid_dim_x,
+            self.mpm_model.grid_dim_y,
+            self.mpm_model.grid_dim_z,
+        )
+        for s in range(substeps):
+            # zero with the union rule (nodes leaving the moving box are cleared once)
+            gbox = (self.grid_launch_box
+                    if (self.restrict_grid and self.grid_launch_box) else None)
+            if gbox is None:
+                g_lo, g_dims = wp.vec3i(0, 0, 0), grid_size
+                z_lo, z_dims = g_lo, g_dims
+                self._prev_grid_box = None
+            else:
+                g_lo, g_dims = wp.vec3i(*gbox[0]), gbox[1]
+                prev = self._prev_grid_box
+                if prev is None:
+                    z_lo, z_dims = g_lo, g_dims
+                else:
+                    zl = tuple(min(prev[0][i], gbox[0][i]) for i in range(3))
+                    zh = tuple(max(prev[0][i] + prev[1][i], gbox[0][i] + gbox[1][i])
+                               for i in range(3))
+                    z_lo = wp.vec3i(*zl)
+                    z_dims = tuple(zh[i] - zl[i] for i in range(3))
+                self._prev_grid_box = gbox
+
+            if s == 0:
+                # prologue: F_trial and stress are whatever the previous tick's epilogue
+                # g2p left, exactly like the first phases of a normal substep
+                with wp.ScopedTimer("zero_grid", synchronize=self.profile,
+                                    active=self.profile, print=False,
+                                    dict=self.time_profile):
+                    wp.launch(kernel=zero_grid, dim=z_dims,
+                              inputs=[self.mpm_state, self.mpm_model, z_lo],
+                              device=device)
+                with wp.ScopedTimer("compute_stress_from_F_trial",
+                                    synchronize=self.profile, active=self.profile,
+                                    print=False, dict=self.time_profile):
+                    wp.launch(kernel=compute_stress_from_F_trial,
+                              dim=self.n_particles,
+                              inputs=[self.mpm_state, self.mpm_model, dt],
+                              device=device)
+                with wp.ScopedTimer("p2g", synchronize=self.profile,
+                                    active=self.profile, print=False,
+                                    dict=self.time_profile):
+                    wp.launch(kernel=p2g_apic_with_stress, dim=self.n_particles,
+                              inputs=[self.mpm_state, self.mpm_model, dt],
+                              device=device)
+            else:
+                with wp.ScopedTimer("zero_grid", synchronize=self.profile,
+                                    active=self.profile, print=False,
+                                    dict=self.time_profile):
+                    wp.launch(kernel=zero_grid_m_vin, dim=z_dims,
+                              inputs=[self.mpm_state, self.mpm_model, z_lo],
+                              device=device)
+                with wp.ScopedTimer("g2p2g_fused", synchronize=self.profile,
+                                    active=self.profile, print=False,
+                                    dict=self.time_profile):
+                    wp.launch(kernel=g2p_stress_p2g, dim=self.n_particles,
+                              inputs=[self.mpm_state, self.mpm_model, dt],
+                              device=device)
+                with wp.ScopedTimer("zero_grid", synchronize=self.profile,
+                                    active=self.profile, print=False,
+                                    dict=self.time_profile):
+                    wp.launch(kernel=zero_grid_vout, dim=z_dims,
+                              inputs=[self.mpm_state, self.mpm_model, z_lo],
+                              device=device)
+
+            with wp.ScopedTimer("grid_update", synchronize=self.profile,
+                                active=self.profile, print=False,
+                                dict=self.time_profile):
+                wp.launch(kernel=grid_normalization_and_gravity, dim=g_dims,
+                          inputs=[self.mpm_state, self.mpm_model, dt, g_lo],
+                          device=device)
+            if self.mpm_model.grid_v_damping_scale < 1.0:
+                wp.launch(kernel=add_damping_via_grid, dim=g_dims,
+                          inputs=[self.mpm_state,
+                                  self.mpm_model.grid_v_damping_scale, g_lo],
+                          device=device)
+
+            self._apply_grid_bc(dt, grid_size, device)
+            self.time = self.time + dt
+
+        # epilogue: bring particle state up to the end of the tick so exports, the
+        # audit, and the next tick's prologue see exactly what p2g2p would produce
+        with wp.ScopedTimer("g2p", synchronize=self.profile, active=self.profile,
+                            print=False, dict=self.time_profile):
+            wp.launch(kernel=g2p, dim=self.n_particles,
+                      inputs=[self.mpm_state, self.mpm_model, dt],
+                      device=device)
+
+    # set particle densities to all_particle_densities,
     def reset_densities_and_update_masses(self, all_particle_densities, device = "cuda:0"):
         src = torch2warp_float(all_particle_densities.detach(), dvc=device)
         wp.copy(self.mpm_state.particle_density, src)

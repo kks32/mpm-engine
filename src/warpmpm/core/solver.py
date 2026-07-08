@@ -54,6 +54,12 @@ class Solver:
     # occupied region is not box-shaped (separated bodies, spread fluid, large empty
     # domains). Storage stays dense; takes precedence over the CUDA-graph fast path.
     sparse: bool = False
+    # claymore-style fused particle pass (docs/claymore_notes.md): interior substeps of
+    # a tick run ONE g2p+stress+p2g kernel instead of three particle passes (S+1 passes
+    # per S substeps instead of 3S). Bitwise-equal to the normal pipeline on CPU.
+    # Falls back silently when the tick uses features the fused path excludes
+    # (rigid bodies, particle modifiers, sparse mode).
+    fused: bool = False
     # per-phase substep profiling: syncs the device around every kernel phase and
     # accumulates timings (zero/stress/p2g/grid_update/BC/g2p). Forces live launches
     # (a captured graph cannot be timed per phase), so a profiled run is slower;
@@ -251,9 +257,17 @@ class Solver:
             self._sim.rebuild_active_blocks(self.device)
         self._sim.profile = self.profile
         self._tick += 1
-        for _ in range(substeps):
-            self._sim.p2g2p(self._step, dt, device=self.device)
-            self._step += 1
+        fused_ok = (self.fused and not self.sparse
+                    and not self._sim.pre_p2g_operations
+                    and not self._sim.particle_velocity_modifiers
+                    and self._sim.n_rigid_bodies == 0)
+        if fused_ok:
+            self._sim.p2g2p_fused_tick(dt, substeps, device=self.device)
+            self._step += substeps
+        else:
+            for _ in range(substeps):
+                self._sim.p2g2p(self._step, dt, device=self.device)
+                self._step += 1
         return self
 
     def profile_report(self) -> str:
