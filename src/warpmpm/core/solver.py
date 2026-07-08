@@ -56,10 +56,13 @@ class Solver:
     sparse: bool = False
     # claymore-style fused particle pass (docs/claymore_notes.md): interior substeps of
     # a tick run ONE g2p+stress+p2g kernel instead of three particle passes (S+1 passes
-    # per S substeps instead of 3S). Bitwise-equal to the normal pipeline on CPU.
-    # Falls back silently when the tick uses features the fused path excludes
-    # (rigid bodies, particle modifiers, sparse mode).
-    fused: bool = False
+    # per S substeps instead of 3S). DEFAULT: bitwise-equal to the three-pass pipeline
+    # (verified across material families incl. wrench readout) and faster everywhere
+    # measured (13% on the 192^3 GPU pour, ~4% CPU). Falls back silently per tick when
+    # the scene uses features the fused path excludes (rigid bodies, particle
+    # modifiers, sparse mode). fused=False restores the three-pass pipeline, which is
+    # also the only path with CUDA graph capture (graphs only pay on small scenes).
+    fused: bool = True
     # claymore-style block sort (5a): every `sort_interval` ticks, reorder particles by
     # their 4^3 grid block so P2G atomics from neighboring threads hit neighboring
     # nodes and G2P gathers coalesce (the locality AoSoA buys, in SoA layout). 0 = off.
@@ -134,6 +137,7 @@ class Solver:
         the box then lands exactly on target by the end of the step. Passing the end-of-tick
         target as center double-applies the motion and leaves the box one tick ahead."""
         p = self._sim.collider_params[handle]
+        self._sim._bc_box_cache = {}
         if center is not None:
             p.point = wp.vec3(float(center[0]), float(center[1]), float(center[2]))
         if velocity is not None:

@@ -296,6 +296,7 @@ class MPM_Simulator_WARP:
         # (used by the equivalence test).
         self.collider_aabbs = []
         self.collider_labels = []  # short names for the per-collider profile rows
+        self._bc_box_cache = {}   # static-collider boxes; invalidated by pose setters
         self.restrict_bc = True
         # live particle grid box for the zero/normalize/damping sweeps, set per control
         # tick by the wrapper (core.Solver.step); None = full grid. Zeroing runs over the
@@ -1072,18 +1073,28 @@ class MPM_Simulator_WARP:
         for k in range(len(self.grid_postprocess)):
             # restrict the launch to the collider's current grid box when it has one;
             # a None box means the collider is outside the domain (skip the launch but
-            # still integrate its pose below)
+            # still integrate its pose below). Colliders WITHOUT a per-substep pose
+            # integrator (modify_bc None) cannot move between substeps, so their box
+            # is cached until a set_* pose call invalidates it: the numpy corner math
+            # per collider per substep was a measurable host-side cost at 432
+            # substeps/tick x 9 static colliders.
             lo_v = wp.vec3i(0, 0, 0)
             dims = grid_size
             skip = False
             fn = self.collider_aabbs[k] if k < len(self.collider_aabbs) else None
             if self.restrict_bc and fn is not None:
-                box = fn()
-                if box is None:
-                    skip = True
+                static = self.modify_bc[k] is None
+                if static and k in self._bc_box_cache:
+                    skip, lo_v, dims = self._bc_box_cache[k]
                 else:
-                    lo_v = wp.vec3i(int(box[0][0]), int(box[0][1]), int(box[0][2]))
-                    dims = box[1]
+                    box = fn()
+                    if box is None:
+                        skip = True
+                    else:
+                        lo_v = wp.vec3i(int(box[0][0]), int(box[0][1]), int(box[0][2]))
+                        dims = box[1]
+                    if static:
+                        self._bc_box_cache[k] = (skip, lo_v, dims)
             if not skip:
                 with wp.ScopedTimer(
                     "BC[%d]:%s" % (k, self.collider_labels[k]
@@ -1964,6 +1975,7 @@ class MPM_Simulator_WARP:
         return idx
 
     def set_revolved_collider_pose(self, idx, point=None, rot=None, velocity=None, omega=None):
+        self._bc_box_cache = {}
         """Drive a revolved collider with its START-of-tick pose and per-tick velocities
         (modify_bc integrates pose -> pose + dt_ctrl*(v, omega) over the substeps)."""
         param = self.collider_params[idx]
@@ -2471,6 +2483,7 @@ class MPM_Simulator_WARP:
         return len(self.collider_params) - 1
 
     def set_sdf_pose(self, handle, center=None, quat=None, velocity=None, omega=None):
+        self._bc_box_cache = {}
         """Command an SDF collider with its START-of-tick pose and per-tick velocity/omega; the
         modify_bc integrates center += dt*velocity and rotates the quat by omega every substep,
         mirroring the box-collider contract (drive with v = (target - prev)/dt_ctrl). Setting

@@ -26,7 +26,7 @@ def _scene(use_graph: bool):
     sdf = _cup_sdf()
     center = np.array([0.2, 0.2, 0.06])
     pts, vol = _fill_cavity(center, grid.dx)
-    s = Solver(grid=grid, device="cuda:0").load_particles(pts, vol)
+    s = Solver(grid=grid, device="cuda:0", fused=False).load_particles(pts, vol)
     s.set_material(newtonian(eta=5.0, density=1000.0, bulk_modulus=5.0e5))
     s.add_plane((0, 0, 3 * grid.dx), (0, 0, 1), "slip", friction=0.2)
     h = s.add_sdf_collider(sdf, center=center, surface="separable", friction=0.3)

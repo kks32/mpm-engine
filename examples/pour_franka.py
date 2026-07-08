@@ -240,7 +240,7 @@ def render_recording(n_grid: int, workers: int = 0, render_max: int = RENDER_MAX
 
 
 def build_scene(device: str, n_grid: int, arm: PandaPour, sparse: bool = False,
-                fused: bool = False, sort_interval: int = 0):
+                fused: bool = True, sort_interval: int = 0):
     grid = GridConfig(n_grid=n_grid, grid_lim=GRID_LIM)
     h = grid.dx / 2
     cup_pos0, cup_quat0 = arm.cup_pose_at(0.0)
@@ -310,7 +310,7 @@ def run(device: str = "auto", n_grid: int = 192, video: bool = True,
         record: bool = False, rebake: bool = False, render_stride: int = 1,
         frames: int | None = None, render_workers: int = 0,
         render_max: int = RENDER_MAX, sparse: bool = False,
-        fused: bool = False, sort_interval: int = 0,
+        fused: bool = True, sort_interval: int = 0,
         profile: bool = False) -> dict:
     OUT.mkdir(parents=True, exist_ok=True)
     arm = make_arm(write_glass_obj(PROFILE, OUT / "glass_render.obj"))
@@ -552,8 +552,9 @@ if __name__ == "__main__":
                     help="active-block sparse grid compute (disables CUDA graph capture; "
                          "A/B it against the default and WARPMPM_NO_CUDA_GRAPH=1)")
     ap.add_argument("--fused", action="store_true",
-                    help="claymore-fused particle pass (one g2p+stress+p2g kernel per "
-                         "interior substep; bitwise-equal to the normal pipeline)")
+                    help="(default; kept for compatibility) claymore-fused particle pass")
+    ap.add_argument("--no-fused", action="store_true",
+                    help="restore the three-pass pipeline (A/B against the fused default)")
     ap.add_argument("--sort-interval", type=int, default=0,
                     help="re-sort particles by grid block every K frames (0 = off; "
                          "GPU locality; changes particle index identity at sort ticks)")
@@ -569,5 +570,5 @@ if __name__ == "__main__":
             video=not args.skip_video and not args.record, record=args.record,
             rebake=args.rebake, frames=args.frames,
             render_workers=args.render_workers, render_max=args.render_max,
-            sparse=args.sparse, fused=args.fused,
+            sparse=args.sparse, fused=not args.no_fused,
             sort_interval=args.sort_interval, profile=args.profile)
