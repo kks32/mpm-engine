@@ -103,7 +103,11 @@ subprocess (`--render-only`), with frames split across parallel workers.
    stays the reference oracle for both.
 6. Learned constitutive residual (trainable seam); terrain on the same core.
 
-## Provenance and acknowledgments
+## License, provenance, acknowledgments
+
+MIT ([LICENSE](LICENSE)) for the group's code. The vendored numerical core in
+`src/warpmpm/kernels/` derives from the upstream UCLA warp-mpm, which is published
+without a license file; see [AUTHORS.md](AUTHORS.md) for the exact boundary and terms.
 
 Full provenance with BibTeX in [AUTHORS.md](AUTHORS.md). In short:
 

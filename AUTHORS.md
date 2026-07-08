@@ -37,8 +37,12 @@ Original upstream contributors (from the fork's git history):
 - Zeshun Zong and the MultiPLES group (UCLA): the original solver and base materials.
 - supertan0204: the weakly-compressible fluid material.
 
-The upstream warp-mpm carries no license file, so the vendored core is included on the same
-terms it was released under. It is kept isolated in `kernels/` so the boundary stays clear.
+The upstream warp-mpm carries no license file (its README asks for citation), so the
+vendored core is included on the same terms it was released under, and the repository's
+MIT license (LICENSE) covers the group's own code: everything outside `kernels/`, plus
+the group's extensions listed below. The upstream-derived portions of `kernels/` remain
+under their authors' copyright until the upstream adds an explicit license; they are kept
+isolated in `kernels/` so the boundary stays clear.
 
 ## Group extensions (UT Austin) on top of that core
 

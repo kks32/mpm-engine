@@ -1,6 +1,7 @@
 [project]
 name = "warpmpm"
 version = "0.0.1"
+license = {text = "MIT"}
 description = "Fast, modular Warp-MPM engine for robot manipulation of deformable + granular media (dough first, terrain/rovers next). Sparse-grid + implicit, MuJoCo coupling, Isaac-ready."
 requires-python = ">=3.12,<3.13"
 dependencies = [
