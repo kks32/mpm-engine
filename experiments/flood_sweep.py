@@ -5,6 +5,10 @@ pair runs the same splat-captured truck, and the figure overlays downstream
 displacement and yaw over time. Final displacement saturating near 0.83 m means the
 truck was washed into the downstream wall (the domain ran out, not the surge).
 
+The truck is model scale (1.45 m); read results at full size via Froude scaling
+(see the examples/flood_vehicle.py header): depths and displacements x lam,
+velocities x sqrt(lam), masses x lam^3, with lam = L_real / 1.45.
+
 Run:  python experiments/flood_sweep.py [--frames 60] [--vehicle PATH] [--up z]
 
 Outputs (out/flood_sweep/): one CSV per case and sweep.png.

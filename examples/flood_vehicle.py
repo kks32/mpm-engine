@@ -7,6 +7,23 @@ overturning come out of the physics. Per frame the run records the body's displa
 from its spawn center and its yaw/pitch/roll; warpmpm.vehicle exposes the same
 FloodScene and FloodHistory for scripted studies over vehicles, depths, and velocities.
 
+Scaling. The bundled truck splat is model scale, 1.45 m long, so the default run is a
+scale model, and Froude scaling (the standard for free-surface flows) converts it to a
+full-size event. With length ratio lam = L_real / L_model:
+
+  length, depth, displacement  x lam
+  velocity, time               x sqrt(lam)
+  mass, force                  x lam^3
+
+For a 5.5 m pickup, lam = 3.8: the default run (28.7 kg truck, 0.15 m depth, 2.0 m/s
+surge, 0.83 m washout) reads as a 1,560 kg pickup in 0.57 m of water moving at
+3.9 m/s, carried 3.2 m. Reynolds number is not matched, as in any Froude model, and
+the water viscosity here is inflated for stability anyway; the vehicle response is
+dominated by the inertial momentum flux rho v^2 h, which Froude scaling preserves.
+To skip the conversion, run at full scale directly: load_vehicle(target_length=5.5)
+with --vehicle-mass 2200 and real depth and velocity (the domain, timestep, and
+substep count adapt; particle count is set by the grid, not the scale).
+
 Run:  python examples/flood_vehicle.py                      # the z-up truck splat
       python examples/flood_vehicle.py --vehicle car.ply --up -y
       python examples/flood_vehicle.py --depth 0.20 --velocity 3.0 --frames 120
