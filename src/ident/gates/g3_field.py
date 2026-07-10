@@ -32,7 +32,7 @@ from ident.gates.g1_oracle import stratify_patches
 from ident.gates.plotting import plot_mu_curves
 from ident.io.schema import load_dump
 from ident.masks.flowing import flowing_mask
-from ident.pressure.closures import p1_particles
+from ident.pressure.closures import p0_particles, p1_particles
 from ident.solve.ridge import ridge_solve
 from ident.weakform.assembly import FrameData, assemble_system
 from ident.weakform.field_reconstruction import StreamFunctionField
@@ -101,9 +101,15 @@ def _reconstruct_frames(dump, pressure_mode="true", quad_dx_factor=1.0,
     for ri, rec in enumerate(records):
         material_accel = dvdt[ri] + np.einsum("nij,nj->ni", rec["L"], rec["v"])
         p_g = rec["p"]
-        if pressure_mode != "true":
+        if pressure_mode == "p1":
             p_g = p1_particles(grid[:, 0], grid[:, 1], material_accel[:, 1],
                                np.full(grid.shape[0], rho_bulk), 4 * dx)
+        elif pressure_mode == "p0":
+            p_g = p0_particles(grid[:, 0], grid[:, 1],
+                               np.full(grid.shape[0], rho_bulk), 4 * dx)
+        elif pressure_mode != "true":
+            raise ValueError(
+                f"pressure_mode must be 'true', 'p1', or 'p0', got {pressure_mode!r}")
         gd = equivalent_shear_rate(rec["D"], EPS_GAMMA_DEFAULT)
         I_g = inertial_number(gd, np.maximum(p_g, 1e-9), d, rho_s)
         # mask: inside the data region (near flowing particles), flowing, p>0
