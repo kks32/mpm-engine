@@ -25,7 +25,7 @@ from pathlib import Path
 import numpy as np
 
 from .appearance import C1, C2, C3
-from .io import GaussianCloud, save_gaussians_ply
+from .io import GaussianCloud, _rotation_to_quat, save_gaussians_ply
 
 _IDX6 = ((0, 0), (0, 1), (0, 2), (1, 1), (1, 2), (2, 2))
 
@@ -57,18 +57,6 @@ def cov6_to_scale_quat(cov6: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     R[flip, :, 0] *= -1.0
     quats = _rotation_to_quat(R).astype(np.float32)
     return scales, quats
-
-
-def _rotation_to_quat(R: np.ndarray) -> np.ndarray:
-    """(N, 3, 3) proper rotations to (N, 4) quaternions (w, x, y, z)."""
-    m = np.asarray(R, dtype=np.float64)
-    t = m[:, 0, 0] + m[:, 1, 1] + m[:, 2, 2]
-    w = 0.5 * np.sqrt(np.clip(1.0 + t, 1e-12, None))
-    x = (m[:, 2, 1] - m[:, 1, 2]) / (4.0 * w)
-    y = (m[:, 0, 2] - m[:, 2, 0]) / (4.0 * w)
-    z = (m[:, 1, 0] - m[:, 0, 1]) / (4.0 * w)
-    q = np.stack([w, x, y, z], axis=1)
-    return q / np.linalg.norm(q, axis=1, keepdims=True)
 
 
 def _fibonacci_dirs(n: int) -> np.ndarray:

@@ -8,6 +8,8 @@ from __future__ import annotations
 import argparse
 import time
 
+import warp as wp
+
 from warpmpm import GridConfig, Solver
 from warpmpm.scenes import block, dough
 
@@ -20,9 +22,11 @@ def bench(n_grid: int, n_warm: int = 5, n_timed: int = 30, device: str = "cuda:0
     s.add_plane((0, 0, floor), (0, 0, 1), "sticky")
     dt = 2.0e-5
     s.step(dt, n_warm)  # warm (kernel JIT compile)
-    t0 = time.time()
+    wp.synchronize_device(device)
+    t0 = time.perf_counter()
     s.step(dt, n_timed)
-    ms = 1e3 * (time.time() - t0) / n_timed
+    wp.synchronize_device(device)
+    ms = 1e3 * (time.perf_counter() - t0) / n_timed
     return {"n_grid": n_grid, "n_particles": s.n_particles, "ms_per_step": ms,
             "device": device}
 

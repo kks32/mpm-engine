@@ -291,11 +291,23 @@ def build_sdf(verts: np.ndarray, faces: np.ndarray, res: int = 64, margin_cells:
                    sdf_max=float(np.abs(signed).max()))
 
 
-def _hashkey(verts, faces, res, margin_cells) -> str:
+_SDF_CACHE_VERSION = 2
+
+
+def _hashkey(verts, faces, res, margin_cells, interior_probe=None) -> str:
+    verts64 = np.ascontiguousarray(verts, dtype=np.float64)
+    if interior_probe is None:
+        probe = 0.5 * (verts64.min(axis=0) + verts64.max(axis=0))
+    else:
+        probe = np.asarray(interior_probe, dtype=np.float64)
+    if probe.shape != (3,) or not np.isfinite(probe).all():
+        raise ValueError(f"interior_probe must be a finite 3-vector, got {probe}")
     h = hashlib.sha1()
-    for arr in (np.ascontiguousarray(verts, dtype=np.float64),
+    for arr in (np.array([_SDF_CACHE_VERSION], dtype=np.int64),
+                verts64,
                 np.ascontiguousarray(faces, dtype=np.int64),
-                np.array([res, margin_cells], dtype=np.float64)):
+                np.array([res, margin_cells], dtype=np.float64),
+                np.ascontiguousarray(probe, dtype=np.float64)):
         h.update(arr.tobytes())
     return h.hexdigest()[:16]
 
@@ -315,11 +327,11 @@ def load_sdf(path: str | Path) -> SDFData:
 
 def build_sdf_cached(verts, faces, res: int = 64, margin_cells: float = 4.0,
                     cache_dir: str | Path | None = None, interior_probe=None) -> SDFData:
-    """build_sdf with an on-disk npz cache keyed by (verts, faces, res, margin)."""
+    """build_sdf with a versioned cache keyed by geometry, grid, and sign probe."""
     if cache_dir is None:
         return build_sdf(verts, faces, res, margin_cells, interior_probe)
     cache_dir = Path(cache_dir)
-    key = _hashkey(verts, faces, res, margin_cells)
+    key = _hashkey(verts, faces, res, margin_cells, interior_probe)
     path = cache_dir / f"sdf_{key}.npz"
     if path.exists():
         return load_sdf(path)

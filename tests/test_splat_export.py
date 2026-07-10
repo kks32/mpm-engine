@@ -26,7 +26,7 @@ from warpmpm.splats import (
     rotate_sh,
 )
 from warpmpm.splats.appearance import C1
-from warpmpm.splats.io import _cov6_from_scale_quat, _quat_to_rotation
+from warpmpm.splats.io import _cov6_from_scale_quat, _quat_to_rotation, _rotation_to_quat
 
 _IDX6 = ((0, 0), (0, 1), (0, 2), (1, 1), (1, 2), (2, 2))
 
@@ -80,6 +80,22 @@ def test_cov6_to_scale_quat_round_trip():
 
     rebuilt = _cov6_from_scale_quat(out_scales, out_quats)
     assert np.allclose(rebuilt, cov6, atol=1e-5)
+
+
+def test_rotation_to_quat_is_stable_at_pi():
+    axes = np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0],
+                     [1.0, -2.0, 3.0]])
+    axes /= np.linalg.norm(axes, axis=1, keepdims=True)
+    # Rodrigues at pi: R = 2 aa^T - I. Include nearby angles through quaternions.
+    exact = 2.0 * np.einsum("ni,nj->nij", axes, axes) - np.eye(3)
+    angles = np.array([np.pi - 1e-10, np.pi + 1e-10])
+    near_q = np.concatenate([
+        np.cos(angles[:, None] / 2.0),
+        np.sin(angles[:, None] / 2.0) * axes[2][None, :],
+    ], axis=1)
+    matrices = np.concatenate([exact, _quat_to_rotation(near_q)], axis=0)
+    rebuilt = _quat_to_rotation(_rotation_to_quat(matrices))
+    assert np.allclose(rebuilt, matrices, atol=1e-9)
 
 
 # --- 2. export_frame_ply loads back through the PLY loader --------------------------------

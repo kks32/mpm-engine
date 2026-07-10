@@ -91,10 +91,18 @@ class Solver:
     # (a captured graph cannot be timed per phase), so a profiled run is slower;
     # the SHARES are the signal. Read the result with profile_report().
     profile: bool = False
+    # Exported volumes and Cauchy stresses are not physical for det(F) <= 0. "warn"
+    # preserves the validated legacy |det(F)| behavior while making the event visible;
+    # "raise" rejects it and "nan" marks invalid particles in fixed-shape exports.
+    inversion_policy: str = "warn"
     _sim: Any = field(default=None, init=False, repr=False)
     _step: int = field(default=0, init=False, repr=False)
     _tick: int = field(default=0, init=False, repr=False)
     _vol0: Any = field(default=None, init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        if self.inversion_policy not in {"warn", "raise", "nan"}:
+            raise ValueError("inversion_policy must be 'warn', 'raise', or 'nan'")
 
     def load_particles(self, pos: np.ndarray, vol: np.ndarray, cov: np.ndarray | None = None,
                        cov_mode: str = "step") -> Solver:
@@ -420,30 +428,50 @@ class Solver:
         return self._sim.export_particle_L_to_torch().cpu().numpy().reshape(-1, 3, 3)
 
     def inverted_count(self) -> int:
-        """Particles with non-positive det(F) (inverted or degenerate). vol() and cauchy()
-        take |det F| so volume and stress stay finite, which hides inversion; call this to
-        detect a nonphysical state (raise substeps or soften the contact if it is nonzero)."""
-        return int((np.linalg.det(self.F()) <= 0.0).sum())
+        """Particles with a non-finite or non-positive deformation Jacobian."""
+        J = np.linalg.det(self.F())
+        return int(np.count_nonzero(~np.isfinite(J) | (J <= 0.0)))
 
-    def _warn_if_inverted(self, J: np.ndarray) -> None:
-        n = int((J <= 0.0).sum())
-        if n and not getattr(self, "_warned_inverted", False):
-            self._warned_inverted = True
-            warnings.warn(f"{n} particles have det(F) <= 0 (inverted); |det F| is used so "
-                          "volume/stress stay finite but the state is nonphysical "
-                          "(see Solver.inverted_count()).", RuntimeWarning, stacklevel=2)
+    def _checked_jacobian(self) -> np.ndarray:
+        if self.inversion_policy not in {"warn", "raise", "nan"}:
+            raise ValueError("inversion_policy must be 'warn', 'raise', or 'nan'")
+        J = np.linalg.det(self.F())
+        invalid = ~np.isfinite(J) | (J <= 0.0)
+        n = int(np.count_nonzero(invalid))
+        if not n:
+            return J
+        message = (
+            f"{n} particles have non-finite or non-positive det(F); current volume "
+            "and Cauchy stress are undefined for an inverted configuration"
+        )
+        if self.inversion_policy == "raise":
+            raise RuntimeError(message)
+        if self.inversion_policy == "warn":
+            if not getattr(self, "_warned_inverted", False):
+                self._warned_inverted = True
+                warnings.warn(
+                    f"{message}; using |det(F)| for compatibility. Set "
+                    "inversion_policy='raise' to reject or 'nan' to mark these particles.",
+                    RuntimeWarning,
+                    stacklevel=3,
+                )
+            compatible = np.abs(J)
+            compatible[~np.isfinite(compatible)] = np.nan
+            return compatible
+        J = J.copy()
+        J[invalid] = np.nan
+        return J
 
     def vol(self) -> np.ndarray:
-        """Current particle volume V0 * |det(F)| (Cauchy stress = Kirchhoff / det F)."""
-        J = np.linalg.det(self.F())
-        self._warn_if_inverted(J)
-        return self._vol0 * np.abs(J)
+        """Current volume under the configured inversion policy."""
+        return self._vol0 * self._checked_jacobian()
 
     def cauchy(self) -> np.ndarray:
-        """Cauchy stress per particle = Kirchhoff (exported) / |det(F)|."""
-        J = np.linalg.det(self.F())
-        self._warn_if_inverted(J)
-        return self.stress() / np.clip(np.abs(J), 1e-9, None)[:, None, None]
+        """Cauchy stress per particle = Kirchhoff / det(F), with explicit inversion policy."""
+        J = self._checked_jacobian()
+        if self.inversion_policy == "warn":
+            J = np.clip(J, 1e-9, None)
+        return self.stress() / J[:, None, None]
 
     def cov(self) -> np.ndarray:
         """Per-particle covariance, shape (N, 6) upper-triangular (xx, xy, xz, yy, yz, zz).

@@ -35,7 +35,7 @@ import numpy as np
 from common.conventions import EPS_GAMMA_DEFAULT, equivalent_shear_rate, gravity_vector_inplane
 from ident.features.base import Dictionary
 from ident.weakform.field_reconstruction import _basis_and_derivs, _clamped_uniform_knots, _kron_rows
-from ident.weakform.galerkin_field import _interior_mask
+from ident.weakform.galerkin_field import _interior_mask, _support_inside_frame_mask
 
 
 def assemble_galerkin_spacetime(
@@ -70,7 +70,23 @@ def assemble_galerkin_spacetime(
     Bc_all, dBc_all, _ = _basis_and_derivs(tt, k, times, nt)
     Bc = Bc_all[:, keep_t]            # (F, J_t)
     dBc = dBc_all[:, keep_t]
-    dt = np.gradient(times)
+    if np.any(np.diff(times) <= 0.0):
+        raise ValueError("frames must be strictly increasing in time")
+    if np.any(np.abs(Bc[[0, -1]]) > 1e-12):
+        raise ValueError("time-weak test functions must vanish at both clip endpoints")
+    dt = np.zeros_like(times)
+    frame_dt = np.diff(times)
+    dt[:-1] += 0.5 * frame_dt
+    dt[1:] += 0.5 * frame_dt
+
+    valid_space = np.stack([
+        _support_inside_frame_mask(fr, tx, tz, k, nx, nz, keep_x, keep_z)
+        for fr in frames
+    ])
+    temporal_support = (np.abs(Bc) + np.abs(dBc)) > 1e-12
+    valid_rows = np.all(
+        ~temporal_support[:, :, None] | valid_space[:, None, :], axis=0
+    ).reshape(-1)
 
     # per-frame spatial integrands
     F = len(frames)
@@ -80,9 +96,9 @@ def assemble_galerkin_spacetime(
     Svw = np.zeros((F, J_s))          # INT rho v . w_s
 
     for fi, fr in enumerate(frames):
-        if fr.mask is None or not np.any(fr.mask):
+        if fr.mask is not None and not np.any(fr.mask):
             continue
-        m = fr.mask
+        m = slice(None) if fr.mask is None else fr.mask
         X = fr.x[m]; vol = fr.vol[m]; rho = fr.rho[m]; p = fr.p[m]
         D = fr.D[m]; v = fr.v[m]; I = fr.I[m]
         gd = equivalent_shear_rate(D, eps_gamma)
@@ -119,4 +135,4 @@ def assemble_galerkin_spacetime(
     A = np.einsum("fc,fak->cak", wdt_Bc, SA).reshape(J_t * J_s, K)
     b = (np.einsum("fc,fa->ca", wdt_Bc, Sgrav + Sconv)
          + np.einsum("fc,fa->ca", wdt_dBc, Svw)).reshape(J_t * J_s)
-    return A, b, J_t * J_s
+    return A[valid_rows], b[valid_rows], int(np.count_nonzero(valid_rows))

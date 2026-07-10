@@ -73,6 +73,31 @@ def test_volume_conserved_in_free_fall():
     assert abs(F1 - F0) / F0 < 5e-3
 
 
+def test_inverted_state_policies_warn_reject_or_mark():
+    import torch
+
+    s = _free_blob(24)
+    F = s.F()
+    np.testing.assert_allclose(np.linalg.det(F), 1.0)
+    F[0, 0, 0] = -1.0
+    s._sim.import_particle_F_from_torch(torch.from_numpy(F), device=s.device)
+
+    with pytest.warns(RuntimeWarning, match=r"using \|det\(F\)\|"):
+        assert np.isfinite(s.vol()).all()
+    assert np.isfinite(s.cauchy()).all()
+
+    s.inversion_policy = "raise"
+    with pytest.raises(RuntimeError, match=r"det\(F\)"):
+        s.vol()
+    with pytest.raises(RuntimeError, match=r"det\(F\)"):
+        s.cauchy()
+
+    s.inversion_policy = "nan"
+    assert np.isnan(s.vol()[0])
+    assert np.isnan(s.cauchy()[0]).all()
+    assert np.isfinite(s.vol()[1:]).all()
+
+
 def test_settles_downward():
     # under gravity on a sticky floor the blob's centroid should not rise
     s = _dough_solver(40)

@@ -81,8 +81,27 @@ def test_quaternion_continuity_full_turn():
         R = baked.at(float(t))["R"]
         err = np.abs(np.einsum("nij,nkj->nik", R, R) - np.eye(3)).max()
         assert err < 1e-4             # orthonormal everywhere: no sign-flip glitches
+        expected = _rot_z(2.0 * np.pi * t / times[-1])
+        assert np.abs(R - expected).max() < 2e-3
     # end state is a full turn: R(t1) is the identity again
     assert np.abs(baked.at(float(times[-1]))["R"] - np.eye(3)).max() < 5e-2
+
+
+def test_interpolated_covariance_remains_positive_definite():
+    frames, times = _analytic_frames(n=40, n_frames=14, total_angle=np.pi)
+    # Strong anisotropic breathing makes entry-wise cubic interpolation a particularly
+    # poor parameterization; the matrix-log path must remain SPD at unseen times.
+    for i, frame in enumerate(frames):
+        frame["cov6"][:, 0] *= np.exp(3.0 * np.sin(2.0 * np.pi * i / (len(frames) - 1)))
+    baked = bake(frames, times, tol_cov=2e-2)
+    idx = ((0, 0), (0, 1), (0, 2), (1, 1), (1, 2), (2, 2))
+    for t in np.linspace(times[0], times[-1], 101):
+        cov6 = baked.at(float(t))["cov6"]
+        cov = np.zeros((len(cov6), 3, 3))
+        for c, (a, b) in enumerate(idx):
+            cov[:, a, b] = cov6[:, c]
+            cov[:, b, a] = cov6[:, c]
+        assert np.linalg.eigvalsh(cov).min() > 0.0
 
 
 def test_save_load_round_trip(tmp_path):
@@ -94,6 +113,7 @@ def test_save_load_round_trip(tmp_path):
     assert np.array_equal(back.coef_pos, baked.coef_pos)
     assert np.array_equal(back.coef_cov, baked.coef_cov)
     assert np.array_equal(back.coef_quat, baked.coef_quat)
+    assert np.array_equal(back.rotation_times, baked.rotation_times)
     assert np.array_equal(back.knots, baked.knots)
     assert back.meta["n_frames"] == baked.meta["n_frames"]
     st_a, st_b = baked.at(0.5), back.at(0.5)

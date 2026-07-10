@@ -391,6 +391,12 @@ class MPM_Simulator_WARP:
             inputs=[self.mpm_state.particle_F_trial],
             device=device,
         )
+        wp.launch(
+            kernel=set_mat33_to_identity,
+            dim=self.n_particles,
+            inputs=[self.mpm_state.particle_F],
+            device=device,
+        )
         # initial deformation gradient is set to identity
 
         self.mpm_state.particle_vol = wp.from_numpy(
@@ -446,6 +452,12 @@ class MPM_Simulator_WARP:
             kernel=set_mat33_to_identity,
             dim=self.n_particles,
             inputs=[self.mpm_state.particle_F_trial],
+            device=device,
+        )
+        wp.launch(
+            kernel=set_mat33_to_identity,
+            dim=self.n_particles,
+            inputs=[self.mpm_state.particle_F],
             device=device,
         )
         # initial trial deformation gradient is set to identity
@@ -1283,6 +1295,11 @@ class MPM_Simulator_WARP:
                         st.particle_stress, st.particle_C, st.particle_L]
         float_arrays = [st.particle_vol, st.particle_mass, st.particle_density,
                         st.particle_Jp]
+        # These model arrays are indexed by particle, unlike E/nu/bulk and the
+        # rheology controls, which are indexed by material type.  They must follow
+        # the state permutation because plastic return mapping can evolve them.
+        model_float_arrays = [self.mpm_model.mu, self.mpm_model.lam,
+                              self.mpm_model.yield_stress]
         float6_arrays = [st.particle_init_cov, st.particle_cov]
         int_arrays = [st.particle_selection, st.particle_material, st.particle_rigid_id]
         listed = {id(a) for a in (vec3_arrays + mat33_arrays + float_arrays
@@ -1315,6 +1332,10 @@ class MPM_Simulator_WARP:
                       device=device)
             wp.copy(arr, sc["mat33"], count=n)
         for arr in float_arrays:
+            wp.launch(kernel=gather_float, dim=n, inputs=[arr, perm_d, sc["float"]],
+                      device=device)
+            wp.copy(arr, sc["float"], count=n)
+        for arr in model_float_arrays:
             wp.launch(kernel=gather_float, dim=n, inputs=[arr, perm_d, sc["float"]],
                       device=device)
             wp.copy(arr, sc["float"], count=n)
@@ -2547,5 +2568,3 @@ class MPM_Simulator_WARP:
 
 
         
-
-

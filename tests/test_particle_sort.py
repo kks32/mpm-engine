@@ -6,6 +6,7 @@ Array pointers must survive the sort (in-place copy-back, the captured-graph con
 from __future__ import annotations
 
 import numpy as np
+import warp as wp
 
 from warpmpm import GridConfig, Solver
 from warpmpm.materials import newtonian
@@ -16,7 +17,8 @@ def _scene(sort_interval=0, n=3000, seed=1):
     rng = np.random.default_rng(seed)
     # two separated blobs so block keys are far from sorted at load
     a = rng.random((n // 2, 3), dtype=np.float32) * 0.08 + 0.12
-    b = rng.random((n - n // 2, 3), dtype=np.float32) * 0.08 + np.array([0.24, 0.24, 0.12], np.float32)
+    b = (rng.random((n - n // 2, 3), dtype=np.float32) * 0.08
+         + np.array([0.24, 0.24, 0.12], np.float32))
     pts = np.concatenate([a, b]).astype(np.float32)
     pts = pts[rng.permutation(len(pts))]              # scramble the initial order
     vol = np.full(len(pts), 1.0e-7, np.float32)
@@ -42,6 +44,31 @@ def test_sort_permutation_is_exact_multiset():
     order_a = np.lexsort(after.T)
     assert np.array_equal(before[order_b], after[order_a]), "sort changed particle state"
     assert s._sort_particles() is False                # second call: already ordered
+
+
+def test_sort_keeps_particle_material_parameters_attached():
+    s = _scene(n=600)
+    model = s._sim.mpm_model
+    n = s.n_particles
+    values = {
+        "mu": np.linspace(10.0, 20.0, n, dtype=np.float32),
+        "lam": np.linspace(30.0, 50.0, n, dtype=np.float32),
+        "yield_stress": np.linspace(60.0, 90.0, n, dtype=np.float32),
+    }
+    for name, value in values.items():
+        wp.copy(getattr(model, name), wp.array(value, dtype=float, device="cpu"))
+
+    before = np.column_stack([
+        s.x(), model.mu.numpy(), model.lam.numpy(), model.yield_stress.numpy()
+    ])
+    ptrs = (model.mu.ptr, model.lam.ptr, model.yield_stress.ptr)
+    assert s._sort_particles() is True
+    after = np.column_stack([
+        s.x(), model.mu.numpy(), model.lam.numpy(), model.yield_stress.numpy()
+    ])
+    np.testing.assert_array_equal(before[np.lexsort(before[:, :3].T)],
+                                  after[np.lexsort(after[:, :3].T)])
+    assert (model.mu.ptr, model.lam.ptr, model.yield_stress.ptr) == ptrs
 
 
 def test_sort_keeps_pointers_and_dynamics_equivalent():

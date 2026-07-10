@@ -177,16 +177,51 @@ def _scale_quat_from_cov6(cov6: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
 def _rotation_to_quat(R: np.ndarray) -> np.ndarray:
     """(N, 3, 3) rotation matrices to (N, 4) quaternions (w, x, y, z). Forces det = +1."""
     R = np.asarray(R, dtype=np.float64).copy()
+    if R.ndim != 3 or R.shape[1:] != (3, 3):
+        raise ValueError(f"R must have shape (N, 3, 3), got {R.shape}")
+    if not np.isfinite(R).all():
+        raise ValueError("R contains non-finite entries")
     flip = np.linalg.det(R) < 0
     R[flip, :, 2] *= -1.0
-    m = R
-    t = m[:, 0, 0] + m[:, 1, 1] + m[:, 2, 2]
-    w = 0.5 * np.sqrt(np.clip(1.0 + t, 1e-12, None))
-    x = (m[:, 2, 1] - m[:, 1, 2]) / (4.0 * w)
-    y = (m[:, 0, 2] - m[:, 2, 0]) / (4.0 * w)
-    z = (m[:, 1, 0] - m[:, 0, 1]) / (4.0 * w)
-    q = np.stack([w, x, y, z], axis=1)
-    return q / np.linalg.norm(q, axis=1, keepdims=True)
+    q = np.empty((len(R), 4), dtype=np.float64)
+    trace = np.trace(R, axis1=1, axis2=2)
+
+    # The positive-trace formula is well conditioned away from pi.  Near pi,
+    # select the largest diagonal component instead; unlike division by 4w,
+    # these branches remain finite when the scalar quaternion component is zero.
+    m = trace > 0.0
+    s = 2.0 * np.sqrt(np.maximum(trace[m] + 1.0, 0.0))
+    q[m, 0] = 0.25 * s
+    q[m, 1] = (R[m, 2, 1] - R[m, 1, 2]) / s
+    q[m, 2] = (R[m, 0, 2] - R[m, 2, 0]) / s
+    q[m, 3] = (R[m, 1, 0] - R[m, 0, 1]) / s
+
+    remaining = ~m
+    mx = remaining & (R[:, 0, 0] >= R[:, 1, 1]) & (R[:, 0, 0] >= R[:, 2, 2])
+    s = 2.0 * np.sqrt(np.maximum(1.0 + R[mx, 0, 0] - R[mx, 1, 1] - R[mx, 2, 2], 0.0))
+    q[mx, 0] = (R[mx, 2, 1] - R[mx, 1, 2]) / s
+    q[mx, 1] = 0.25 * s
+    q[mx, 2] = (R[mx, 0, 1] + R[mx, 1, 0]) / s
+    q[mx, 3] = (R[mx, 0, 2] + R[mx, 2, 0]) / s
+
+    my = remaining & ~mx & (R[:, 1, 1] >= R[:, 2, 2])
+    s = 2.0 * np.sqrt(np.maximum(1.0 + R[my, 1, 1] - R[my, 0, 0] - R[my, 2, 2], 0.0))
+    q[my, 0] = (R[my, 0, 2] - R[my, 2, 0]) / s
+    q[my, 1] = (R[my, 0, 1] + R[my, 1, 0]) / s
+    q[my, 2] = 0.25 * s
+    q[my, 3] = (R[my, 1, 2] + R[my, 2, 1]) / s
+
+    mz = remaining & ~mx & ~my
+    s = 2.0 * np.sqrt(np.maximum(1.0 + R[mz, 2, 2] - R[mz, 0, 0] - R[mz, 1, 1], 0.0))
+    q[mz, 0] = (R[mz, 1, 0] - R[mz, 0, 1]) / s
+    q[mz, 1] = (R[mz, 0, 2] + R[mz, 2, 0]) / s
+    q[mz, 2] = (R[mz, 1, 2] + R[mz, 2, 1]) / s
+    q[mz, 3] = 0.25 * s
+
+    norm = np.linalg.norm(q, axis=1, keepdims=True)
+    if np.any(norm == 0.0):
+        raise ValueError("R contains a matrix that cannot be converted to a quaternion")
+    return q / norm
 
 
 def make_synthetic_cloud(shape: str = "box", n: int = 6000, size=(0.12, 0.10, 0.07),

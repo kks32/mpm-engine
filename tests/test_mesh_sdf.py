@@ -11,7 +11,7 @@ import functools
 
 import numpy as np
 
-from warpmpm.geometry import build_sdf, make_cup_mesh, revolve_profile
+from warpmpm.geometry import build_sdf, build_sdf_cached, make_cup_mesh, revolve_profile
 
 
 def _trilerp(sdf, p):
@@ -101,3 +101,12 @@ def test_revolve_profile_closed_watertight_count():
     assert len(f) > 0
     # faces index valid vertices
     assert f.min() >= 0 and f.max() < len(v)
+
+
+def test_cache_key_includes_interior_probe(tmp_path):
+    v, f = _sphere_mesh(R=0.03, n_theta=16, n_ang=12)
+    build_sdf_cached(v, f, res=18, margin_cells=3, cache_dir=tmp_path,
+                     interior_probe=np.array([0.0, 0.0, 0.0]))
+    build_sdf_cached(v, f, res=18, margin_cells=3, cache_dir=tmp_path,
+                     interior_probe=np.array([0.005, 0.0, 0.0]))
+    assert len(list(tmp_path.glob("sdf_*.npz"))) == 2
