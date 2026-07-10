@@ -50,7 +50,8 @@ Floods and rigid bodies:
 
 - `flood_vehicle.py`: a water surge hits a splat-captured vehicle held as one rigid
   body; grid momentum becomes body force and torque, so pushing, floating, and
-  overturning come out of the coupling. Records displacement from the spawn center
+  overturning come out of the coupling (at 25 cm depth and 3 m/s a 150 kg/m^3 truck
+  floats up and rolls onto its side). Records displacement from the spawn center
   and yaw/pitch/roll per frame; `--vehicle` takes any 3DGS PLY or watertight mesh,
   `--depth` and `--velocity` set the surge. The same scene is importable
   (`warpmpm.vehicle.FloodScene`) for parameter studies.

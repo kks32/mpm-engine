@@ -163,8 +163,12 @@ def load_vehicle(path, up: str = "z", spacing: float | None = None,
 @dataclass
 class FloodHistory:
     """Per-frame rigid-body record. displacement is com minus the spawn com in scene
-    coordinates (x = surge direction, y = along the vehicle, z = up); yaw/pitch/roll are
-    ZYX Euler angles of the body rotation from spawn, in degrees."""
+    coordinates (x = surge direction, y = along the vehicle, z = up). Angles are ZYX
+    Euler angles of the body rotation from spawn, in degrees, reported in the vehicle's
+    frame: yaw is heading (about z), roll is rotation about the vehicle's long axis
+    (y, so a side-hit rollover reads as roll), pitch is about the surge axis (x).
+    Near |roll| = 90 (vehicle on its side) yaw and pitch are degenerate (the ZYX
+    gimbal singularity); read roll alone there."""
     t: list = field(default_factory=list)
     displacement: list = field(default_factory=list)
     yaw: list = field(default_factory=list)
@@ -178,8 +182,10 @@ class FloodHistory:
         self.displacement.append(state["com"] - com0)
         y, p, r = euler_zyx(state["R"])
         self.yaw.append(np.degrees(y))
-        self.pitch.append(np.degrees(p))
-        self.roll.append(np.degrees(r))
+        # the long axis lies along y, so the Euler pitch (about y) is the vehicle's
+        # roll and the Euler roll (about x) its pitch
+        self.pitch.append(np.degrees(r))
+        self.roll.append(np.degrees(p))
         self.v.append(state["v"])
         self.omega.append(state["omega"])
 
