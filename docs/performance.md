@@ -100,6 +100,29 @@ array invalidates the pointers baked into a captured graph (observed as CUDA err
 700). A pointer-based graph signature forces recapture as a backstop and
 WARPMPM_NO_CUDA_GRAPH=1 disables capture in the field.
 
+The split pipeline captures at full grid dims, which is why it loses at 192^3. The
+fused pipeline captures differently: its interior segment (split zero, fused pass,
+second zero, normalize, damping) is captured over the particle box padded by four
+cells and replayed until the live box escapes the pad, so the graph removes the
+per-substep launch overhead without baking a full-grid sweep. The padding is
+bitwise-safe because nodes outside the box are already zero, normalize skips massless
+nodes, and damping scales zeros. Expected to recover the roughly 14 percent host
+overhead the post-fusion profile shows; the graph-vs-live bitwise test
+(test_fused_graph_replay_bitwise_on_cuda) needs a GPU and is the Vista gate, so this
+is unverified on-device as of this writing.
+
+### Substep count (CFL)
+
+The substep count per control tick is set by the acoustic CFL, so lowering it is the
+cheapest lever short of an implicit integrator. `pour_franka --cfl` exposes the
+target (default 0.28). MLS-MPM with quadratic B-splines usually holds near 0.4 to
+0.45. A 96^3 smoke A/B (120 frames): 0.42 ran 144 substeps per frame against 216 at
+0.28 (1.5x fewer), stayed stable, and left the ledger essentially unchanged (spill
+and air 1.6 percent in both; leak audit 18 vs 6 projected particles of 40k). That run
+is short enough that the stream never reaches the receiver, so it measures stability
+and substep count, not transfer fidelity. The gate before changing the default is a
+192^3 full-transfer run on the GH200.
+
 ### Active-block sparse compute
 
 `sparse=True` marks the 4^3 grid blocks touched by particle stencils, dilates by one
