@@ -59,7 +59,7 @@ def kirchoff_stress_tabulated(
     # but eta_app(gd) is read from a TABLE on s = log10(gd) in [smin, smax] (n uniform
     # samples) with clamped linear interpolation, instead of the parametric HB formula.
     # This lets an FE-recovered eta_app(gd) curve be re-simulated directly. eps and the
-    # EOS match the newtonian kernel exactly so the only difference is the eta_app source.
+    # EOS match the newtonian kernel exactly.
     eps = 0.05
     gamma = 1.1
     pressure = -bulk * (wp.pow(J, -gamma) - 1.0)
@@ -395,7 +395,7 @@ def mu_i_tabulated_return_mapping(
     # mu(I) curve be re-simulated directly. The mu-table is stored in model.eta_table
     # (re-used; a granular tabulated material and a viscous tabulated material are never
     # active in the same run). Everything else (pressure, bisection, stress) matches
-    # material 9 exactly, so the only difference is the source of mu(I).
+    # material 9 exactly.
     U = wp.mat33(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
     V = wp.mat33(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
     sig = wp.vec3(0.0)
@@ -879,7 +879,7 @@ def stress_update_particle(state: MPMStateStruct, model: MPMModelStruct, dt: flo
             J = wp.determinant(state.particle_F_trial[p])
             Jcbr = J**(1.0 / 3.0)
             state.particle_F[p] = wp.mat33(Jcbr, 0.0, 0.0, 0.0, Jcbr, 0.0, 0.0, 0.0, Jcbr)
-        elif mat == 7 or mat == 8:  # stationary / rigid — no deformation
+        elif mat == 7 or mat == 8:  # stationary / rigid, no deformation
             state.particle_F[p] = wp.mat33(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
         else:  # jelly (0), snow (4), or custom
             state.particle_F[p] = state.particle_F_trial[p]
@@ -1277,7 +1277,7 @@ def rigid_particle_update(
         oz = omega[2]
         state.particle_C[p] = wp.mat33(0.0, -oz, oy,  oz, 0.0, -ox,  -oy, ox, 0.0)
 
-        # rigid — no deformation
+        # rigid, no deformation
         state.particle_F[p] = wp.mat33(1.0, 0.0, 0.0,  0.0, 1.0, 0.0,  0.0, 0.0, 1.0)
 
 

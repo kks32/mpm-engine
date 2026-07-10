@@ -82,9 +82,9 @@ def _logit(p: np.ndarray) -> np.ndarray:
 def load_gaussians_ply(path, sh_degree: int | None = None) -> GaussianCloud:
     """Load an INRIA-layout Gaussian-splat PLY into a GaussianCloud (world units).
 
-    sh_degree None (the default) infers the degree from the f_rest_* fields present,
-    so DC-only files (for example sh_mode="dc" exports) load without arguments. An
-    explicit sh_degree must not exceed what the file carries."""
+    sh_degree defaults to None, which infers the degree from the f_rest_* fields
+    present, so DC-only files (for example sh_mode="dc" exports) load without
+    arguments. An explicit sh_degree must not exceed what the file carries."""
     from plyfile import PlyData
 
     ply = PlyData.read(str(path))

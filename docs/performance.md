@@ -15,7 +15,7 @@ substeps per frame.
 | --- | --- |
 | before this work | 782 |
 | mass-gated colliders, shelled walls, restricted launches | 319 |
-| plus the fused particle pass (the default today) | 278 |
+| plus the fused particle pass | 278 |
 
 CPU results depend on the regime. Collider-heavy fluid scenes gain 3.0 to 3.2x from
 the grid-side work; a particle-bound dough press gains almost nothing on CPU because
@@ -53,7 +53,7 @@ particle speed, and zeroing runs over the union with the previous box so departi
 nodes are cleared exactly once. Solver.step raises if particles come within two
 cells of the grid edge, which also closes the out-of-bounds P2G write a review had
 flagged. Bench on a 72^3 plane-plus-two-SDF scene: 15.4 to 4.5 ms per substep.
-Restricted and full launches produce bitwise-equal positions.
+Restricted and full launches produce bitwise-identical positions.
 
 ### Mass-gated colliders and shelled walls
 
@@ -76,8 +76,9 @@ passes instead of 3S. The port follows claymore's g2p2g design (Wang et al., ACM
 existing grid double buffer: the fused kernel reads grid_v_out (state n) and
 scatters into grid_v_in and grid_m (state n+1), which are disjoint arrays.
 
-Bitwise equality with the split pipeline holds because the zeroing is split around
-the fused pass: grid_m and grid_v_in are cleared before it, grid_v_out after it.
+The fused output stays bitwise-identical to the split pipeline because the zeroing is
+split around the fused pass: grid_m and grid_v_in are cleared before it, grid_v_out
+after it.
 Normalize writes grid_v_out only where mass exceeds 1e-15, so sub-threshold stencil
 nodes must read an explicitly zeroed grid_v_out on the next gather; clearing it
 early would instead erase the state the fused kernel still needs. The fused path

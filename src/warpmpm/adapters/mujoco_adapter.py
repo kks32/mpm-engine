@@ -1,6 +1,6 @@
 """MuJoCo Franka adapter: load a Panda, drive a scripted end-effector descent, expose its
-world pose/velocity to the coupling layer, and render the arm (for the reference-style
-view). Isaac Lab plugs into the same contract later (set_robot_kinematics / wrench).
+world pose/velocity to the coupling layer, and render the arm. Isaac Lab plugs into the
+same contract later (set_robot_kinematics / wrench).
 
 v1 keeps the arm KINEMATIC (scripted qpos), since the dough is the dynamics; the arm's
 end-effector drives the MPM gripper box and reads back the reaction wrench.
@@ -20,7 +20,7 @@ def _default_mujoco_gl() -> None:
 
 
 class FrankaArm:
-    """Franka Panda in MuJoCo, native on Apple Silicon. Scripted vertical descent."""
+    """Franka Panda in MuJoCo. Scripted vertical descent."""
 
     # raised / lowered arm configs (7 arm joints); fingers held closed-ish
     Q_UP = np.array([0.0, -0.3, 0.0, -1.9, 0.0, 1.6, 0.79])
@@ -80,8 +80,8 @@ class FrankaArm:
         self.model.vis.global_.offheight = max(int(self.model.vis.global_.offheight), height)
         if sphere_detail is not None:
             # tessellation of PROCEDURAL geoms (the particle spheres; robot meshes are
-            # unaffected). The default 28x16 is ~500 triangles per sphere, absurd for
-            # particles a few pixels wide; (8, 6) halves the GL frame time at 3e5 geoms
+            # unaffected). The default 28x16 is ~500 triangles per sphere, far more than
+            # particles a few pixels wide need; (8, 6) halves the GL frame time at 3e5 geoms
             # with no visible change at particle scale. Must be set before the Renderer
             # is built (the GL context bakes the tessellation).
             self.model.vis.quality.numslices = int(sphere_detail[0])

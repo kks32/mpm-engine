@@ -21,7 +21,7 @@ Manipulation and coupling:
 
 Pouring:
 
-- `pour_franka.py`: the flagship pour. A Franka pours honey glass to glass with per-frame
+- `pour_franka.py`: A Franka pours honey glass to glass with per-frame
   metrics, wrench readouts on both glasses, a leak audit, and a record/render process
   split for GPU clusters (see the header and docs/performance.md).
 - `pour_glass.py`: minimal mesh-to-SDF pour, the API demo for arbitrary watertight mesh

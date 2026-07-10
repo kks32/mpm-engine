@@ -1,4 +1,4 @@
-"""Device-auto Solver: a small typed wrapper over the warp-mpm fork.
+"""Device-auto Solver: a typed wrapper over the warp-mpm fork.
 
 Centralizes device handling, Warp init, and the common load/material/collider/step/export
 calls, so scenes, tests, and the coupling backend never touch the raw fork or sys.path.
@@ -56,7 +56,7 @@ class GridConfig:
 
 @dataclass
 class Solver:
-    """Thin owner of one MPM_Simulator_WARP instance; device resolves at load time."""
+    """Owner of one MPM_Simulator_WARP instance; device resolves at load time."""
 
     grid: GridConfig = field(default_factory=GridConfig)
     device: str = "auto"
@@ -213,7 +213,7 @@ class Solver:
         OUTSIDE the surface (approach is stopped before material can creep into the wall)
         down to sticky_cells*dx inside it, full grab deeper (anti-tunneling backstop).
         Returns a handle; drive it each control tick with set_cup. Accumulates the
-        Newton-exact reaction impulse AND torque; read with cup_wrench after step()."""
+        reaction impulse and torque; read with cup_wrench after step()."""
         from warpmpm.colliders.glass import quat_to_mat
 
         # the sticky core must survive inside the wall: cap the friction shell at just
@@ -249,10 +249,10 @@ class Solver:
         return self
 
     def cup_wrench(self, handle: int, dt: float) -> dict:
-        """Newton-exact reaction wrench the material exerts on a cup collider, from the
-        grid impulse accumulated since the last reset over elapsed time dt: force[3] and
-        torque[3] (about the cup centre). A static cup holding m kg of settled liquid
-        reads force ~ (0, 0, -m*g), the liquid's weight pressing on the glass."""
+        """Reaction wrench the material exerts on a cup collider: the exact accumulated
+        grid impulse, not a stress integral, since the last reset over elapsed time dt.
+        Returns force[3] and torque[3] (about the cup centre). A static cup holding m kg of
+        settled liquid reads force ~ (0, 0, -m*g), the liquid's weight pressing on the glass."""
         p = self._sim.collider_params[handle]
         return {
             "force": np.asarray(p.force.numpy()[0], dtype=float) / dt,
@@ -282,9 +282,9 @@ class Solver:
 
     def set_sdf_pose(self, handle: int, center=None, quat=None, velocity=None, omega=None
                      ) -> Solver:
-        """Update an SDF collider's pose/velocity/angular-velocity (called each control tick).
-        Like set_box, pass the START-of-tick center/quat and the per-tick velocity/omega; the
-        fork integrates center += dt*velocity and rotates the quat by omega on every substep."""
+        """Update an SDF collider's pose (called each control tick). Same start-of-tick
+        center + per-tick velocity/omega contract as set_box and set_cup; the fork integrates
+        center += dt*velocity and rotates the quat by omega on every substep."""
         self._sim.set_sdf_pose(handle, center=center, quat=quat, velocity=velocity, omega=omega)
         return self
 
@@ -295,8 +295,8 @@ class Solver:
         return self
 
     def sdf_wrench(self, handle: int, dt: float) -> dict:
-        """Newton-exact reaction WRENCH the material exerts on an SDF collider, from the grid
-        impulse accumulated since the last reset: force = sum m*(v_free - v_new) / dt, torque =
+        """Reaction wrench the material exerts on an SDF collider, from the grid impulse
+        accumulated since the last reset: force = sum m*(v_free - v_new) / dt, torque =
         sum (x - center) x impulse / dt (about the collider centre, world frame). Returns
         {'force': (3,), 'torque': (3,)}. The general 6-DOF analogue of tool_force for the box."""
         f = np.asarray(self._sim.collider_params[handle].force.numpy()[0], dtype=float)
@@ -304,7 +304,7 @@ class Solver:
         return {"force": f / dt, "torque": t / dt}
 
     def reset_tool_force(self, handle: int) -> Solver:
-        """Zero a box collider's Newton-exact reaction-impulse accumulator. Call before the
+        """Zero a box collider's reaction-impulse accumulator. Call before the
         substeps you want to integrate the force over (typically before step())."""
         self._sim.collider_params[handle].force.zero_()
         return self
@@ -484,7 +484,7 @@ class Solver:
         """Per-particle polar rotation R of F (Sigma' = R Sigma0 R^T holds under rigid
         motion), shape (N, 3, 3). The splat SH view-direction trick applies R^T to the
         camera->splat direction. The kernel stores R^T internally, so this transposes it
-        back to the polar rotation for a mathematically clean getter."""
+        back to the polar rotation."""
         R = self._sim.export_particle_R_to_torch(device=self.device).cpu().numpy(
             ).reshape(-1, 3, 3)
         return np.transpose(R, (0, 2, 1))

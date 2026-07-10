@@ -8,7 +8,7 @@ can catch free-surface / EOS-ring particles momentarily in TENSION; we gate the 
 compressive normal stress (sigma_zz < 0) so only particles actually pressing the box
 contribute, which removes the wrong-signed low-force transient. This is the
 cross-validation baseline; a later kernel-level grid-impulse capture will replace it with
-a per-substep exact wrench whose magnitude can be calibrated against an analytic plate
+a per-substep wrench whose magnitude can be calibrated against an analytic plate
 force.
 """
 from __future__ import annotations

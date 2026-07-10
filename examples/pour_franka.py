@@ -12,7 +12,7 @@ impact-aeration artifact water-like pours show on this solver (splash-deposited 
 that the J-blind EOS freezes about 35% loose). The remaining volume excess is a loose
 crown about one cell thick, measured first order in dx (1.060 at 128^3, 1.036 at
 192^3), hence the 192^3 default. Both glasses are kinematic revolved-SDF colliders
-with Newton-exact wrench accumulators: the held glass reads the wrist-load analog,
+with grid-impulse wrench accumulators: the held glass reads the wrist-load analog,
 and the receiving glass acts as a scale, its Fz growth giving the transferred weight,
 cross-checked against the particle count each frame.
 

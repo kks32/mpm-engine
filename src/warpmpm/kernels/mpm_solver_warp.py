@@ -1861,7 +1861,7 @@ class MPM_Simulator_WARP:
         collider_param.velocity = wp.vec3(velocity[0], velocity[1], velocity[2])
         # collider_param.threshold = threshold
         collider_param.reset = reset
-        # Newton-exact reaction-impulse accumulator: each substep the collide kernel adds
+        # reaction-impulse accumulator: each substep the collide kernel adds
         # sum_nodes m*(v_free - v_imposed) (the impulse the material delivers to the cuboid)
         # BEFORE it overwrites the node velocity. Reaction force = (this) / elapsed dt.
         collider_param.force = wp.zeros(1, dtype=wp.vec3, device=self.mpm_state.grid_m.device)
@@ -1931,7 +1931,7 @@ class MPM_Simulator_WARP:
     # should reach (the wall is >= 3 cells thick at the intended resolutions). Every
     # substep the kernel accumulates the exact reaction impulse m*(v_free - v_imposed)
     # AND its torque about `point` BEFORE overwriting the node, so wrench = impulse/dt
-    # is the Newton-exact wrench the material exerts on the glass. modify_bc advances
+    # is the reaction wrench the material exerts on the glass. modify_bc advances
     # point += dt*v and rot <- exp(dt*skew(omega)) rot each substep, so over one control
     # tick the glass sweeps start-of-tick pose -> commanded target (the set_box
     # contract, extended to rotation).

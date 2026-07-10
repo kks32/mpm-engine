@@ -5,12 +5,11 @@ dough pressing and shaping, glass-to-glass pouring, granular flows. It couples t
 MuJoCo today and is built with NVIDIA Isaac Lab in mind (Warp to PyTorch is zero-copy
 on CUDA).
 
-The core is the validated warp-mpm fork (bit-for-bit the kernels behind the TrackEUCLID
-results) wrapped behind a small typed `Solver`, with a heavily optimized explicit MLS/APIC
-step: a claymore-style fused G2P2G particle pass (the default), AABB-restricted grid
-launches, mass-gated colliders, an active-block sparse mode, CUDA graph capture, and
-per-phase profiling. Every optimization is equivalence-tested; the default pipeline is
-bitwise-identical to the original solver.
+The core is the validated warp-mpm fork (the kernels behind the TrackEUCLID results)
+wrapped behind a typed `Solver`, with an explicit MLS/APIC step: a claymore-style fused
+G2P2G particle pass, AABB-restricted grid launches, mass-gated colliders, an active-block
+sparse mode, CUDA graph capture, and per-phase profiling. Every optimization keeps the
+default pipeline bitwise-identical to the pre-optimization solver; see Performance.
 
 ## Design
 
@@ -19,8 +18,8 @@ robot sim (MuJoCo / Isaac) ── link poses, velocities ──▶ warpmpm
                             ◀── per-link 6D wrench, contact obs ──
 ```
 
-The MPM owns the material; the robot sim owns the robot; the coupling exchanges only
-compact wrenches (never particles). 13 materials (Newtonian/Bingham/Herschel-Bulkley
+The MPM owns the material and the robot sim owns the robot; the coupling exchanges
+compact wrenches rather than particles. 13 materials (Newtonian/Bingham/Herschel-Bulkley
 dough, mu(I) sand incl. tabulated laws, elastic, von Mises, weakly compressible fluid).
 
 What exists:
@@ -30,22 +29,23 @@ What exists:
   described below. Kinematic box collider (`add_box` / `set_box`) as the robot
   end-effector proxy.
 - `kernels/`: the vendored fork. Explicit MLS/APIC transfers, quadratic B-splines,
-  fused G2P2G, revolved-SDF glasses with Newton-exact wrench accumulators, mesh-SDF
+  fused G2P2G, revolved-SDF glasses with grid-impulse wrench accumulators, mesh-SDF
   colliders, restricted launches, active-block compute, CUDA graphs.
 - `materials/`: composable presets (`newtonian`, `granular`, `elastic`, `vonmises`,
   `dough`, tabulated laws).
 - `geometry/`: watertight mesh to SDF (winding-number sign), cached; cup meshes.
 - `colliders/glass.py`: analytic revolved glass profile, cavity/solid masks, leak
   projection.
-- `coupling/`: grid-impulse (Newton-exact) and stress-integral wrench readouts;
-  two-way force feedback (the arm halts on the dough).
+- `coupling/`: grid-impulse and stress-integral contact-wrench readouts; the grid-impulse
+  wrench is the exact accumulated grid impulse rather than a stress integral. Two-way
+  force feedback halts the arm on the dough.
 - `splats/`: Gaussian-splat scenes, PhysGaussian style. PLY load/save, interior fill,
   per-particle covariance advection and polar-rotation SH; see `examples/splat_sim.py`.
 - `adapters/mujoco_adapter.py`: Franka arm, scripted press and pour kinematics,
   composite offscreen rendering of arm + glasses + particles.
 - `src/ident/`, `src/common/`: the warp-free EUCLID identification stack (weak-form
   constitutive recovery); an import-boundary test keeps it free of warp/torch.
-- `examples/`: one curated demo per capability (pour, force-feedback press, gripper
+- `examples/`: one demo per capability (pour, force-feedback press, gripper
   shaping, squeeze identification, wrist-FT cross-check, shear-cell rheology, surface
   render), sharing helpers through `examples/common.py`; `examples/recovery/` holds
   the constitutive-recovery examples. See `examples/README.md`.
@@ -60,7 +60,7 @@ Measured on the 192^3 honey pour (340k particles, 432 substeps/frame, GH200):
 | --- | --- |
 | before this optimization pass | 782 |
 | + mass-gated colliders, shelled walls | 319 |
-| + fused G2P2G (now the default) | 278 |
+| + fused G2P2G | 278 |
 
 CPU (Apple Silicon, collider-heavy fluid scene): 3.0 to 3.2x over the same baseline.
 All of it with bitwise-identical trajectories, deformation gradients, and stress against
@@ -69,9 +69,9 @@ the pre-optimization engine, and identical identification results downstream.
 Solver flags (all default-off except `fused`):
 
 - `fused=True` (default): one fused g2p+stress+p2g particle pass per interior substep
-  instead of three passes. Bitwise-equal; falls back per tick for rigid bodies,
-  particle modifiers, or sparse mode. `fused=False` restores the three-pass path
-  (the only one with CUDA graph capture).
+  instead of three passes. Bitwise-identical to the three-pass path; falls back per tick
+  for rigid bodies, particle modifiers, or sparse mode. `fused=False` restores the
+  three-pass path, the only path with CUDA graph capture.
 - `sparse=True`: active-block grid sweeps for scenes whose occupancy is not box-shaped.
 - `sort_interval=K`: claymore-style block sort of particle storage every K ticks
   (GPU locality; changes particle index identity, so keep 0 for index-paired dumps).

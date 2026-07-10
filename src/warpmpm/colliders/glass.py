@@ -274,7 +274,7 @@ def project_out_of_solid(x, v, pos, quat, profile: GlassProfile, clearance: floa
 def write_glass_obj(profile: GlassProfile, path, segments: int = 48,
                     fillet_segments: int = 8):
     """Write the watertight open-top glass render mesh (OBJ, triangles, outward
-    winding): outer wall, rim annulus, inner wall, filleted cavity floor, bottom cap --
+    winding): outer wall, rim annulus, inner wall, filleted cavity floor, bottom cap,
     the same topology as the Genesis study's _write_glass_mesh, so the two simulators render
     the same glass. Pure numpy (no trimesh). Local frame = the SDF/collider frame."""
     from pathlib import Path

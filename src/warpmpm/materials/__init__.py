@@ -93,8 +93,8 @@ class Material:
         if self.base == "elastic":
             return "jelly", dict(E=self.E, nu=self.nu, density=self.density)
         if self.base == "vonmises":
-            # fork "metal" (id 1): StVK elastic predictor + von-Mises (J2) radial return. A solid
-            # that HOLDS a shape; identified by (G via E,nu) and yield_stress, with optional xi.
+            # fork "metal" (id 1): StVK elastic predictor + von-Mises (J2) radial return.
+            # Identified by (G via E,nu) and yield_stress, with optional xi.
             return "metal", dict(E=self.E, nu=self.nu, density=self.density,
                                  yield_stress=self.yield_stress, xi=self.hardening_xi)
         if self.base == "tabulated":
