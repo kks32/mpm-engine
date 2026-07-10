@@ -783,6 +783,15 @@ class MPM_Simulator_WARP:
                 if dists[min_i] >= 0.0:
                     continue  # no penetration
 
+                # Positional stabilization: project the body out of the surface by
+                # the deepest penetration. The grid gather resets v_cm every substep,
+                # so the impulse alone cannot hold a resting body against sustained
+                # load; without this it creeps through the plane.
+                push = (-float(dists[min_i])) * n
+                x_cm_np[b] = x_cm_np[b] + push
+                x_world = x_world + push
+                modified = True
+
                 # Contact point and lever arm
                 x_contact = x_world[min_i].astype(np.float64)
                 r = x_contact - x_cm.astype(np.float64)
@@ -822,8 +831,10 @@ class MPM_Simulator_WARP:
         if modified:
             v_cm_torch    = wp.to_torch(self.rigid_v_cm)
             omega_torch   = wp.to_torch(self.rigid_omega)
+            x_cm_torch    = wp.to_torch(self.rigid_x_cm)
             v_cm_torch[:] = torch.from_numpy(v_cm_np.astype(np.float32)).to(v_cm_torch.device)
             omega_torch[:] = torch.from_numpy(omega_np.astype(np.float32)).to(omega_torch.device)
+            x_cm_torch[:] = torch.from_numpy(x_cm_np.astype(np.float32)).to(x_cm_torch.device)
 
     def rebuild_active_blocks(self, device="cpu"):
         """Rebuild the 4^3 active-block list from current particle positions (call once

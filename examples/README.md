@@ -46,6 +46,15 @@ Rendering:
   `--from-bake IN.npz` re-exports viewer frames at any frame count from the bake.
   Needs the `splats` extra (plyfile, scipy).
 
+Floods and rigid bodies:
+
+- `flood_vehicle.py`: a water surge hits a splat-captured vehicle held as one rigid
+  body; grid momentum becomes body force and torque, so pushing, floating, and
+  overturning come out of the coupling. Records displacement from the spawn center
+  and yaw/pitch/roll per frame; `--vehicle` takes any 3DGS PLY or watertight mesh,
+  `--depth` and `--velocity` set the surge. The same scene is importable
+  (`warpmpm.vehicle.FloodScene`) for parameter studies.
+
 `recovery/` holds the constitutive-recovery examples (elastic and plastic drops,
 sequential identification, sample complexity); see its README. Paper studies and figure
 scripts live in `../experiments/`.

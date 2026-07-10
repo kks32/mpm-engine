@@ -53,3 +53,9 @@ Design:
 
 - `pressure_covariance_sweep.py`: information-matrix and covariance study of the
   (tau_y, eta) weak form across press loads.
+
+Floods:
+
+- `flood_sweep.py`: truck displacement and yaw over a grid of flood depths and surge
+  velocities, using `warpmpm.vehicle.FloodScene` (the study form of
+  `examples/flood_vehicle.py`).

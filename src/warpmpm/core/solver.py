@@ -172,8 +172,47 @@ class Solver:
         self._sim.finalize_mu_lam(device=self.device)
         return self
 
-    def add_plane(self, point, normal, surface: str = "sticky", friction: float = 0.0) -> Solver:
-        self._sim.add_surface_collider(tuple(point), tuple(normal), surface, friction=friction)
+    def set_material_range(self, start: int, end: int, material, **overrides) -> Solver:
+        """Assign a material to particles [start, end), overriding the global material.
+        Accepts a Material or a fork material name plus per-range parameters (density
+        updates per-particle mass in the range). For material "rigid", pass obj_id to
+        group particles into one body, then call finalize_rigid_bodies once all rigid
+        ranges are assigned."""
+        if hasattr(material, "resolve"):
+            name, params = material.resolve()
+        else:
+            name, params = str(material), {}
+        params = {"material": name, **params, **overrides}
+        self._sim.set_parameters_for_particles(start, end, params, device=self.device)
+        return self
+
+    def finalize_rigid_bodies(self) -> Solver:
+        """Compute each rigid body's center of mass, mass, and inertia from the particles
+        assigned material "rigid". Call after every set_material_range and before the
+        first step. Rigid scenes run the split pipeline (the fused path excludes them)."""
+        self._sim.finalize_rigid_bodies(device=self.device)
+        return self
+
+    def rigid_state(self, body: int = 0) -> dict:
+        """State of one rigid body: com (3,), v (3,), omega (3,), R (3, 3). The
+        displacement from the spawn pose is com minus the com recorded at
+        finalize_rigid_bodies; rotation from spawn is R itself (bodies start at
+        identity orientation)."""
+        return {
+            "com": self._sim.rigid_x_cm.numpy()[body].copy(),
+            "v": self._sim.rigid_v_cm.numpy()[body].copy(),
+            "omega": self._sim.rigid_omega.numpy()[body].copy(),
+            "R": self._sim.rigid_orientation.numpy()[body].copy(),
+        }
+
+    def add_plane(self, point, normal, surface: str = "sticky", friction: float = 0.0,
+                  restitution: float = 0.0) -> Solver:
+        """Grid BCs act on fluid and deformable particles only; a rigid body sails
+        through them. restitution in (0, 1] additionally registers the plane as a
+        rigid-body contact surface (impulse at the deepest penetrating particle),
+        which is the only way a plane stops a rigid body."""
+        self._sim.add_surface_collider(tuple(point), tuple(normal), surface,
+                                       friction=friction, restitution=restitution)
         return self
 
     def add_box(self, center, half_size, velocity=(0.0, 0.0, 0.0),
