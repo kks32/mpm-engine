@@ -69,7 +69,7 @@ from warpmpm.colliders.glass import (
 
 OUT = Path(__file__).resolve().parents[1] / "out" / "pour_franka"
 
-# ---- scene constants, world frame (= the Genesis study's world; the Panda base at (-0.15, 0, 0)) --
+# ---- scene constants, world frame (the Genesis study's; Panda base at (-0.15, 0, 0)) ----
 PROFILE = GlassProfile()                                   # the Genesis study's glass
 # Receiver rests on the floor (z = height/2). the Genesis study used (0.29, -0.20); ours is shifted
 # to the MEASURED stream centroid at rim height (the MPM stream lands 5 cm further +x
@@ -104,12 +104,14 @@ def sound_speed(liq: dict) -> float:
     return float(np.sqrt(1.1 * liq["bulk_modulus"] / liq["density"]))
 
 
-def substeps_per_tick(liq: dict, dx: float, dt_tick: float) -> int:
-    """Acoustic CFL (0.28) plus the explicit-viscosity stability bound: the viscous
-    stress 2*eta*dev(D) is integrated explicitly, which needs dt <= rho*dx^2/(6*eta)
-    (3-D diffusion limit). Water never feels the second term; it overtakes the
-    acoustic bound around eta ~ 100 Pa.s at 128^3."""
-    acoustic = sound_speed(liq) / (0.28 * dx)
+def substeps_per_tick(liq: dict, dx: float, dt_tick: float, cfl: float = 0.28) -> int:
+    """Acoustic CFL (default 0.28) plus the explicit-viscosity stability bound: the
+    viscous stress 2*eta*dev(D) is integrated explicitly, which needs
+    dt <= rho*dx^2/(6*eta) (3-D diffusion limit). Water never feels the second term;
+    it overtakes the acoustic bound around eta ~ 100 Pa.s at 128^3. MLS-MPM with
+    quadratic B-splines typically holds to CFL ~0.4-0.45; --cfl exposes the dial for
+    A/B against the pour ledger before any default change."""
+    acoustic = sound_speed(liq) / (cfl * dx)
     viscous = 6.0 * liq["eta"] / (liq["density"] * dx * dx)
     return int(np.ceil(dt_tick * max(acoustic, viscous)))
 
@@ -307,7 +309,7 @@ def glass_audit(x_mpm, pos_world, quat, h: float):
     return n_solid, cav, vol
 
 
-def run(device: str = "auto", n_grid: int = 192, video: bool = True,
+def run(device: str = "auto", n_grid: int = 192, video: bool = True, cfl: float = 0.28,
         record: bool = False, rebake: bool = False, render_stride: int = 1,
         frames: int | None = None, render_workers: int = 0,
         render_max: int = RENDER_MAX, sparse: bool = False,
@@ -323,7 +325,7 @@ def run(device: str = "auto", n_grid: int = 192, video: bool = True,
     n0 = s.n_particles
     m_liq = float(HONEY["density"] * vol.sum())
     dt_tick = 1.0 / FPS
-    substeps = substeps_per_tick(HONEY, grid.dx, dt_tick)
+    substeps = substeps_per_tick(HONEY, grid.dx, dt_tick, cfl=cfl)
     dt = dt_tick / substeps
     n_frames = round((arm.duration + HOLD_SECONDS) * FPS)  # pose clamps home after duration
     if frames is not None:
@@ -559,6 +561,10 @@ if __name__ == "__main__":
     ap.add_argument("--sort-interval", type=int, default=0,
                     help="re-sort particles by grid block every K frames (0 = off; "
                          "GPU locality; changes particle index identity at sort ticks)")
+    ap.add_argument("--cfl", type=float, default=0.28,
+                    help="acoustic CFL target for the substep count (default 0.28; "
+                         "0.40-0.45 is the usual MLS-MPM stability edge; validate any "
+                         "increase against the ledger metrics before trusting it)")
     ap.add_argument("--profile", action="store_true",
                     help="per-phase substep timing table (forces live launches + a device "
                          "sync per phase, so the run is slower; the shares are the signal)")
@@ -571,5 +577,5 @@ if __name__ == "__main__":
             video=not args.skip_video and not args.record, record=args.record,
             rebake=args.rebake, frames=args.frames,
             render_workers=args.render_workers, render_max=args.render_max,
-            sparse=args.sparse, fused=not args.no_fused,
+            sparse=args.sparse, fused=not args.no_fused, cfl=args.cfl,
             sort_interval=args.sort_interval, profile=args.profile)

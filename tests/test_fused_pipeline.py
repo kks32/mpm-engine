@@ -79,3 +79,34 @@ def test_fused_conserves_mass_momentum_sanity():
     x, v, F, stress, _ = _run(MATERIALS[0][1], fused=True)
     assert np.isfinite(x).all() and np.isfinite(v).all()
     assert np.isfinite(F).all() and np.isfinite(stress).all()
+
+
+def test_fused_graph_replay_bitwise_on_cuda():
+    """The captured interior-substep graph must replay bitwise against live fused
+    launches: identical kernels, dims padded only over provably zero nodes. CUDA only;
+    the capture path is inert on CPU."""
+    import warp as wp
+
+    if wp.get_cuda_device_count() == 0:
+        pytest.skip("CUDA graph capture needs a GPU")
+
+    def run(graphs: bool):
+        grid, pts, vol = _blob()
+        s = Solver(grid=grid, device="cuda:0", fused=True).load_particles(pts, vol)
+        s._sim.use_cuda_graph = graphs
+        s.set_material(newtonian(eta=5.0, density=1000.0))
+        s.add_plane((0, 0, 3 * grid.dx), (0, 0, 1), "separate", friction=0.3)
+        s.add_domain_walls()
+        h = s.add_cup(PROF, np.array([0.2, 0.2, 3 * grid.dx + 0.001]))
+        s.set_cup(h, center=np.array([0.2, 0.2, 3 * grid.dx + 0.001]),
+                  quat=(1.0, 0.0, 0.0, 0.0), velocity=(0.02, 0.0, 0.0),
+                  omega=(0.0, 0.0, 0.0))
+        for _ in range(6):
+            s.step(2.0e-4, 8)
+        return s.x(), s.v(), s.F()
+
+    x_g, v_g, F_g = run(graphs=True)
+    x_l, v_l, F_l = run(graphs=False)
+    np.testing.assert_array_equal(x_g, x_l)
+    np.testing.assert_array_equal(v_g, v_l)
+    np.testing.assert_array_equal(F_g, F_l)
