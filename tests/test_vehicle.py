@@ -5,7 +5,14 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from warpmpm.vehicle import FloodScene, VehicleBody, _up_rotation, euler_zyx, solidify_columns
+from warpmpm.vehicle import (
+    FloodScene,
+    VehicleBody,
+    _up_rotation,
+    euler_zyx,
+    load_vehicle,
+    solidify_columns,
+)
 
 
 def _box_shell(size=(0.08, 0.12, 0.06), h=0.01):
@@ -51,6 +58,20 @@ def test_up_rotation_and_euler_roundtrip():
                    [0, 0, 1]])
     y, p, r = euler_zyx(Rz)
     assert np.isclose(np.degrees(y), 25.0) and abs(p) < 1e-9 and abs(r) < 1e-9
+
+
+def test_load_vehicle_from_mesh(tmp_path):
+    trimesh = pytest.importorskip("trimesh")
+    m = trimesh.creation.box(extents=(0.5, 0.2, 0.15))
+    path = tmp_path / "box.stl"
+    m.export(path)
+    v = load_vehicle(path, target_length=1.0)
+    # long axis rotated to y and rescaled; floor at z = 0; solid interior
+    assert np.isclose(v.extent[1], 1.0, rtol=0.05)
+    assert v.extent[1] > v.extent[0]
+    assert v.particles[:, 2].min() > -v.spacing
+    assert v.n_particles > 200
+    assert v.splat_pos is None  # meshes render nothing; particles still simulate
 
 
 def test_flood_pushes_rigid_body_downstream():
