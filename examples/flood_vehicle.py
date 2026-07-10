@@ -87,17 +87,19 @@ def _metrics_figure(history, path):
 
 
 def run(vehicle_path=DEFAULT_PLY, up="z", depth=0.12, velocity=1.5, frames=90,
-        n_grid=64, vehicle_density=250.0, render=True, render_every=2, device="auto",
-        out=None):
+        n_grid=64, vehicle_density=250.0, vehicle_mass=None, render=True,
+        render_every=2, device="auto", out=None):
     outdir = Path(out) if out is not None else OUT
     outdir.mkdir(parents=True, exist_ok=True)
     v = load_vehicle(vehicle_path, up=up)
     print(f"vehicle: {v.n_particles} solid particles, extent "
           f"{np.round(v.extent, 3)} m, spacing {v.spacing*1000:.1f} mm")
     scene = FloodScene(v, depth=depth, velocity=velocity, n_grid=n_grid,
-                       vehicle_density=vehicle_density, device=device)
+                       vehicle_density=vehicle_density, vehicle_mass=vehicle_mass,
+                       device=device)
     print(f"grid {n_grid}^3 lim={scene.grid.grid_lim:.2f}m  water {scene.n_water} + "
-          f"vehicle {scene.n_total - scene.n_water} particles  "
+          f"vehicle {scene.n_total - scene.n_water} particles "
+          f"({scene.vehicle_mass:.1f} kg)  "
           f"dt={scene.dt:.2e} ({scene.substeps} substeps/frame)")
 
     tmp = outdir / "_frames"
@@ -141,12 +143,14 @@ if __name__ == "__main__":
     parser.add_argument("--grid", type=int, default=64)
     parser.add_argument("--vehicle-density", type=float, default=250.0,
                         help="effective body density (kg/m^3); vehicles are mostly air")
+    parser.add_argument("--vehicle-mass", type=float, default=None,
+                        help="total body mass (kg); overrides --vehicle-density")
     parser.add_argument("--out", default=None,
                         help="output directory (default out/flood_vehicle)")
     args = parser.parse_args()
     res = run(vehicle_path=args.vehicle, up=args.up, depth=args.depth,
               velocity=args.velocity, frames=args.frames, n_grid=args.grid,
-              vehicle_density=args.vehicle_density, render=not args.no_render,
-              device=args.device, out=args.out)
+              vehicle_density=args.vehicle_density, vehicle_mass=args.vehicle_mass,
+              render=not args.no_render, device=args.device, out=args.out)
     print("final:", {kk: (round(vv, 4) if isinstance(vv, float) else vv)
                      for kk, vv in res.items()})

@@ -58,8 +58,12 @@ def test_flood_pushes_rigid_body_downstream():
     v = VehicleBody(particles=solidify_columns(shell, 0.008), spacing=0.008,
                     extent=np.array([0.08, 0.12, 0.06]), surface=shell)
     scene = FloodScene(v, depth=0.04, velocity=1.2, n_grid=24, fps=20,
-                       bulk_modulus=4.0e4, settle_frames=2, device="cpu")
+                       bulk_modulus=4.0e4, settle_frames=2, device="cpu",
+                       vehicle_mass=1.7)
     assert scene.solver._sim.n_rigid_bodies == 1
+    # vehicle_mass overrides density and matches the fork's own body mass
+    assert np.isclose(scene.vehicle_mass, 1.7)
+    assert np.isclose(scene.solver._sim.rigid_mass.numpy()[0], 1.7, rtol=1e-5)
     scene.run(frames=3)
     d = np.asarray(scene.history.displacement[-1])
     assert np.isfinite(d).all()

@@ -217,11 +217,13 @@ class FloodScene:
     momentum accumulates into its force and torque each substep, so sliding, floating,
     and overturning come out of the coupling. vehicle_density is the body's effective
     density (vehicles are mostly air; a car is roughly 100 to 300 kg/m^3 spread over
-    its volume, which is why they float)."""
+    its volume, which is why they float); vehicle_mass, if given, overrides it with a
+    total mass in kg. The realized mass is self.vehicle_mass either way."""
 
     def __init__(self, vehicle: VehicleBody, depth: float = 0.12, velocity: float = 1.5,
                  water_density: float = 1000.0, water_eta: float = 1.0,
                  bulk_modulus: float = 1.5e5, vehicle_density: float = 250.0,
+                 vehicle_mass: float | None = None,
                  n_grid: int = 64, fps: int = 30, floor_friction: float = 0.5,
                  settle_frames: int = 8, device: str = "auto", seed: int = 0):
         self.vehicle = vehicle
@@ -238,6 +240,11 @@ class FloodScene:
         # match the vehicle's particle pitch to the scene so the body blocks flow
         if vehicle.spacing > 1.2 * h:
             vehicle.solidify(h)
+
+        solid_volume = vehicle.n_particles * h ** 3
+        if vehicle_mass is not None:
+            vehicle_density = vehicle_mass / solid_volume
+        self.vehicle_mass = vehicle_density * solid_volume
 
         # vehicle placement: centered in y, at 60 percent of x, resting on the floor
         vx, vy = 0.60 * lim, 0.50 * lim
