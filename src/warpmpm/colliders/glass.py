@@ -159,6 +159,17 @@ class GlassProfile:
         return float(np.trapezoid(np.pi * self.inner_radius_at_z(zs) ** 2, zs))
 
 
+def glass_mid_surface_profile(profile: GlassProfile | None = None) -> np.ndarray:
+    """Open (r, z) polyline of the glass mid-surface: the floor disk at half the base
+    thickness and the wall at the mid radius. Revolve with revolve_profile_open and
+    feed build_surface_cdf for the CPIC thin-wall glass. The floor fillet is a cavity
+    detail thinner than the CDF band and is not represented."""
+    p = GlassProfile() if profile is None else profile
+    r_mid = 0.5 * (p.inner_radius + p.outer_radius)
+    z_floor = p.inner_floor_z - 0.5 * p.base_thickness
+    return np.array([(0.0, z_floor), (r_mid, z_floor), (r_mid, p.rim_z)])
+
+
 def _capped_cylinder_sdf(r_xy, z, radius: float, z0: float, z1: float):
     """Exact SDF of the solid cylinder r <= radius, z in [z0, z1] (vectorized)."""
     zc, hh = 0.5 * (z0 + z1), 0.5 * (z1 - z0)

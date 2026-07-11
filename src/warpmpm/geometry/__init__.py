@@ -10,21 +10,33 @@ the engine keeps its numpy + warp footprint and the field is fully testable.
 from __future__ import annotations
 
 from warpmpm.geometry.mesh_sdf import (
+    CDFData,
     SDFData,
     build_sdf,
     build_sdf_cached,
+    build_surface_cdf,
+    build_surface_cdf_cached,
+    load_cdf,
     load_sdf,
     make_cup_mesh,
     revolve_profile,
+    revolve_profile_open,
+    save_cdf,
     save_sdf,
 )
 
 __all__ = [
+    "CDFData",
     "SDFData",
     "build_sdf",
     "build_sdf_cached",
+    "build_surface_cdf",
+    "build_surface_cdf_cached",
+    "load_cdf",
     "load_sdf",
     "make_cup_mesh",
     "revolve_profile",
+    "revolve_profile_open",
+    "save_cdf",
     "save_sdf",
 ]

@@ -44,6 +44,35 @@ class SDFData:
         return int(self.values.shape[0])
 
 
+@dataclass
+class CDFData:
+    """A cubic colored-distance field around an OPEN oriented mid-surface, for CPIC
+    thin-boundary colliders (Hu et al., SIGGRAPH 2018).
+
+    Unlike SDFData, the surface has no interior: values is the signed distance to the
+    surface sheet itself, with the sign taken from the nearest face's normal (which
+    side of the sheet the point is on). The field is only meaningful within a narrow
+    band of the sheet AND away from the sheet's open rim, where no consistent side
+    exists; valid marks that region.
+
+    values[res,res,res]  signed distance to the mid-surface (side-signed) in metres
+    valid[res,res,res]   1.0 where the distance and side are trustworthy, else 0.0
+    origin (3,)          mesh-frame coordinate of voxel index (0,0,0)
+    cell                 mesh-frame metres per voxel (isotropic, cubic grid)
+    band                 metres from the sheet within which valid can be 1
+    """
+
+    values: np.ndarray
+    valid: np.ndarray
+    origin: np.ndarray
+    cell: float
+    band: float
+
+    @property
+    def res(self) -> int:
+        return int(self.values.shape[0])
+
+
 # --------------------------------------------------------------------------------------
 # procedural meshes
 # --------------------------------------------------------------------------------------
@@ -79,6 +108,50 @@ def revolve_profile(profile_rz, n_theta: int = 64):
     for i in range(P):
         i2 = (i + 1) % P
         ri, ri2 = rings[i], rings[i2]
+        for j in range(n_theta):
+            j2 = (j + 1) % n_theta
+            a, b, c, d = ri[j], ri[j2], ri2[j2], ri2[j]
+            on_axis_i = a == b
+            on_axis_i2 = c == d
+            if on_axis_i and on_axis_i2:
+                continue
+            if on_axis_i:
+                faces.append((a, c, d))
+            elif on_axis_i2:
+                faces.append((a, b, c))
+            else:
+                faces.append((a, b, c))
+                faces.append((a, c, d))
+    return np.asarray(verts, dtype=float), np.asarray(faces, dtype=np.int64)
+
+
+def revolve_profile_open(profile_rz, n_theta: int = 64):
+    """Revolve an OPEN 2D polyline (r,z), r>=0, around the z-axis into an open surface
+    (no closure back to the first point, no caps). Shares revolve_profile's ring
+    machinery; the result is the mid-surface input for build_surface_cdf. Face winding
+    is uniform, so face normals consistently point to one side of the sheet."""
+    profile = np.asarray(profile_rz, dtype=float)
+    P = len(profile)
+    thetas = np.linspace(0.0, 2.0 * np.pi, n_theta, endpoint=False)
+    ct, st = np.cos(thetas), np.sin(thetas)
+    axis_eps = 1e-9
+
+    verts: list[tuple[float, float, float]] = []
+    rings: list[list[int]] = []
+    for r, z in profile:
+        if r <= axis_eps:
+            idx = len(verts)
+            verts.append((0.0, 0.0, float(z)))
+            rings.append([idx] * n_theta)
+        else:
+            base = len(verts)
+            for j in range(n_theta):
+                verts.append((float(r) * ct[j], float(r) * st[j], float(z)))
+            rings.append([base + j for j in range(n_theta)])
+
+    faces: list[tuple[int, int, int]] = []
+    for i in range(P - 1):
+        ri, ri2 = rings[i], rings[i + 1]
         for j in range(n_theta):
             j2 = (j + 1) % n_theta
             a, b, c, d = ri[j], ri[j2], ri2[j2], ri2[j]
@@ -289,6 +362,156 @@ def build_sdf(verts: np.ndarray, faces: np.ndarray, res: int = 64, margin_cells:
     return SDFData(values=signed.astype(np.float64), grads=grads.astype(np.float64),
                    origin=origin.astype(np.float64), cell=float(cell),
                    sdf_max=float(np.abs(signed).max()))
+
+
+def _sample_surface_with_faces(verts: np.ndarray, faces: np.ndarray, spacing: float
+                               ) -> tuple[np.ndarray, np.ndarray]:
+    """Like _sample_surface but each sample carries its source face index, so the
+    nearest sample also yields the nearest face's normal for side classification."""
+    a = verts[faces[:, 0]]
+    b = verts[faces[:, 1]]
+    c = verts[faces[:, 2]]
+    areas = 0.5 * np.linalg.norm(np.cross(b - a, c - a), axis=1)
+    pts: list[np.ndarray] = []
+    fid: list[np.ndarray] = []
+    for i in range(len(faces)):
+        n = int(max(1, np.ceil(np.sqrt(areas[i]) / max(spacing, 1e-9))))
+        if n <= 1:
+            pts.append(((a[i] + b[i] + c[i]) / 3.0)[None])
+            fid.append(np.array([i]))
+            continue
+        u, vv = np.meshgrid(np.linspace(0, 1, n + 1), np.linspace(0, 1, n + 1),
+                            indexing="ij")
+        u = u.ravel(); vv = vv.ravel()
+        m = (u + vv) <= 1.0
+        u, vv = u[m], vv[m]
+        pts.append(a[i] + u[:, None] * (b[i] - a[i]) + vv[:, None] * (c[i] - a[i]))
+        fid.append(np.full(m.sum(), i))
+    return np.concatenate(pts, axis=0), np.concatenate(fid, axis=0)
+
+
+def _boundary_loop_samples(verts: np.ndarray, faces: np.ndarray, spacing: float
+                           ) -> np.ndarray:
+    """Dense samples on the mesh's open-boundary edges (edges with exactly one
+    incident face); empty (0,3) for a closed mesh."""
+    edges = np.concatenate([faces[:, [0, 1]], faces[:, [1, 2]], faces[:, [2, 0]]])
+    key = np.sort(edges, axis=1)
+    uniq, counts = np.unique(key, axis=0, return_counts=True)
+    open_edges = uniq[counts == 1]
+    if len(open_edges) == 0:
+        return np.zeros((0, 3))
+    pts = []
+    for i0, i1 in open_edges:
+        a, b = verts[i0], verts[i1]
+        n = int(max(2, np.ceil(np.linalg.norm(b - a) / max(spacing, 1e-9)) + 1))
+        t = np.linspace(0.0, 1.0, n)[:, None]
+        pts.append(a[None] * (1 - t) + b[None] * t)
+    return np.concatenate(pts, axis=0)
+
+
+def build_surface_cdf(verts: np.ndarray, faces: np.ndarray, res: int = 64,
+                      band_cells: float = 3.0, margin_cells: float = 4.0) -> CDFData:
+    """Voxelize an OPEN oriented mid-surface into a CDFData (side-signed distance plus
+    a validity mask) for CPIC thin-boundary colliders.
+
+    Distance and side come from the nearest surface sample (spacing 0.4 cells, the
+    accuracy build_sdf already accepts): magnitude = distance to the sample, sign =
+    which side of that sample's face normal the point is on. Validity requires BOTH
+    |d| <= band AND distance to the surface's open rim > band: past the rim no
+    consistent side exists, and without the rim exclusion trilinear interpolation
+    would fabricate a phantom surface there. The excluded rim tube (radius ~band) is
+    inherent to open surfaces; material flows through it untagged, which is the
+    behavior a pour needs at a glass rim.
+    """
+    verts = np.asarray(verts, dtype=float)
+    faces = np.asarray(faces, dtype=np.int64)
+    lo = verts.min(axis=0)
+    hi = verts.max(axis=0)
+    center = 0.5 * (lo + hi)
+    span = float((hi - lo).max())
+    cell = span / (res - 1 - 2 * margin_cells)
+    band = band_cells * cell
+    L = cell * (res - 1)
+    origin = center - 0.5 * L
+    axes = [origin[d] + cell * np.arange(res) for d in range(3)]
+    X, Y, Z = np.meshgrid(axes[0], axes[1], axes[2], indexing="ij")
+    grid_pts = np.stack([X, Y, Z], axis=-1).reshape(-1, 3)
+
+    fa = verts[faces[:, 0]]
+    fb = verts[faces[:, 1]]
+    fc = verts[faces[:, 2]]
+    normals = np.cross(fb - fa, fc - fa)
+    normals /= np.maximum(np.linalg.norm(normals, axis=1, keepdims=True), 1e-30)
+
+    samples, sample_face = _sample_surface_with_faces(verts, faces, spacing=0.4 * cell)
+    rim = _boundary_loop_samples(verts, faces, spacing=0.4 * cell)
+    try:
+        from scipy.spatial import cKDTree
+        dist, idx = cKDTree(samples).query(grid_pts, workers=-1)
+        rim_dist = (cKDTree(rim).query(grid_pts, workers=-1)[0]
+                    if len(rim) else np.full(len(grid_pts), np.inf))
+    except Exception:
+        # numpy fallback: chunked argmin over samples (procedural meshes are small)
+        dist = np.empty(len(grid_pts))
+        idx = np.empty(len(grid_pts), dtype=np.int64)
+        for s in range(0, len(grid_pts), 2048):
+            d2 = np.linalg.norm(grid_pts[s:s + 2048, None, :] - samples[None], axis=2)
+            idx[s:s + 2048] = d2.argmin(axis=1)
+            dist[s:s + 2048] = d2.min(axis=1)
+        if len(rim):
+            rim_dist = np.empty(len(grid_pts))
+            for s in range(0, len(grid_pts), 2048):
+                rim_dist[s:s + 2048] = np.linalg.norm(
+                    grid_pts[s:s + 2048, None, :] - rim[None], axis=2).min(axis=1)
+        else:
+            rim_dist = np.full(len(grid_pts), np.inf)
+
+    n_near = normals[sample_face[idx]]
+    side = np.sign(np.einsum("ij,ij->i", grid_pts - samples[idx], n_near))
+    side[side == 0.0] = 1.0
+    signed = (side * dist).reshape(res, res, res)
+    valid = ((dist <= band) & (rim_dist > band)).astype(np.float64
+                                                        ).reshape(res, res, res)
+    return CDFData(values=signed.astype(np.float64), valid=valid,
+                   origin=origin.astype(np.float64), cell=float(cell),
+                   band=float(band))
+
+
+_CDF_CACHE_VERSION = 1
+
+
+def save_cdf(cdf: CDFData, path: str | Path) -> None:
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    np.savez_compressed(path, values=cdf.values, valid=cdf.valid, origin=cdf.origin,
+                        cell=cdf.cell, band=cdf.band)
+
+
+def load_cdf(path: str | Path) -> CDFData:
+    d = np.load(path)
+    return CDFData(values=d["values"], valid=d["valid"], origin=d["origin"],
+                   cell=float(d["cell"]), band=float(d["band"]))
+
+
+def build_surface_cdf_cached(verts, faces, res: int = 64, band_cells: float = 3.0,
+                             margin_cells: float = 4.0,
+                             cache_dir: str | Path | None = None) -> CDFData:
+    """build_surface_cdf with a versioned cache keyed by geometry and grid."""
+    if cache_dir is None:
+        return build_surface_cdf(verts, faces, res, band_cells, margin_cells)
+    cache_dir = Path(cache_dir)
+    h = hashlib.sha1()
+    for arr in (np.array([_CDF_CACHE_VERSION], dtype=np.int64),
+                np.ascontiguousarray(verts, dtype=np.float64),
+                np.ascontiguousarray(faces, dtype=np.int64),
+                np.array([res, band_cells, margin_cells], dtype=np.float64)):
+        h.update(arr.tobytes())
+    path = cache_dir / f"cdf_{h.hexdigest()[:16]}.npz"
+    if path.exists():
+        return load_cdf(path)
+    cdf = build_surface_cdf(verts, faces, res, band_cells, margin_cells)
+    save_cdf(cdf, path)
+    return cdf
 
 
 _SDF_CACHE_VERSION = 2
