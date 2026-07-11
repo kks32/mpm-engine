@@ -14,6 +14,11 @@ MATERIAL_NAME_TO_ID = {
     "tabulated_mu_i": 13,
 }
 MAX_MATERIALS = 16
+# CPIC thin-boundary lanes: 2 tag bits per lane plus a 2-bit owner id fit an int32
+# with room to raise later; 4 keeps the per-lane vote accumulators in one wp.vec4
+# inside the (register-heavy) fused transfer kernel.
+MAX_CDF = 4
+CDF_OWNER_SHIFT = 2 * MAX_CDF
 
 
 # ---------------------------------------------------------------------------
@@ -284,6 +289,33 @@ class MPM_Simulator_WARP:
             dtype=wp.vec3,
             device=device,
         )
+
+        # CPIC colored distance field: off (n_cdf = 0) and placeholder-sized until
+        # the first add_cdf_collider allocates the real grids (a 192^3 run without
+        # CDF colliders should not pay ~113 MB for four unused grids). The lane
+        # arrays are tiny and always allocated.
+        self.mpm_model.n_cdf = 0
+        for name in ("grid_cdf_tag", "grid_cdf_tag_prev"):
+            setattr(self.mpm_state, name,
+                    wp.zeros(shape=(1, 1, 1), dtype=int, device=device))
+        for name in ("grid_cdf_d", "grid_cdf_d_prev"):
+            setattr(self.mpm_state, name,
+                    wp.zeros(shape=(1, 1, 1), dtype=float, device=device))
+        for name in ("cdf_lane_center", "cdf_lane_velocity", "cdf_lane_omega",
+                     "cdf_lane_center_prev", "cdf_lane_velocity_prev",
+                     "cdf_lane_omega_prev", "cdf_reaction_force",
+                     "cdf_reaction_torque"):
+            setattr(self.mpm_state, name,
+                    wp.zeros(shape=MAX_CDF, dtype=wp.vec3, device=device))
+        self.mpm_state.cdf_lane_friction = wp.zeros(shape=MAX_CDF, dtype=float,
+                                                    device=device)
+        self.mpm_state.cdf_lane_type = wp.zeros(shape=MAX_CDF, dtype=int,
+                                                device=device)
+        self.cdf_params = []
+        self.cdf_aabbs = []
+        self.cdf_labels = []
+        self._cdf_guard = {}
+        self._cdf_prev_stamp_box = None
 
         self.time = 0.0
 
@@ -962,7 +994,8 @@ class MPM_Simulator_WARP:
             st = self.mpm_state
             sig = (float(dt), bool(self.mpm_model.grid_v_damping_scale < 1.0),
                    st.particle_x.ptr, st.particle_v.ptr, st.particle_F.ptr,
-                   st.particle_stress.ptr, st.grid_m.ptr)
+                   st.particle_stress.ptr, st.grid_m.ptr,
+                   int(self.mpm_model.n_cdf), st.grid_cdf_tag.ptr)
             if self._graph_sig != sig:
                 try:
                     self._capture_substep_graphs(dt, device, grid_size)
@@ -1298,7 +1331,8 @@ class MPM_Simulator_WARP:
                     sig = (float(dt),
                            bool(self.mpm_model.grid_v_damping_scale < 1.0),
                            st.particle_x.ptr, st.particle_v.ptr, st.particle_F.ptr,
-                           st.particle_stress.ptr, st.grid_m.ptr, self.n_particles)
+                           st.particle_stress.ptr, st.grid_m.ptr, self.n_particles,
+                           int(self.mpm_model.n_cdf), st.grid_cdf_tag.ptr)
                     box = self._fused_graph_box
                     inside = (self._fused_graph is not None
                               and self._fused_graph_sig == sig

@@ -61,6 +61,9 @@ class MPMModelStruct:
     ####### for PhysGaussian: covariance
     update_cov_with_F: int
 
+    ####### CPIC thin-boundary (CDF) colliders: 0 = feature off, transfers untouched
+    n_cdf: int
+
 
 @wp.struct
 class MPMStateStruct:
@@ -95,6 +98,30 @@ class MPMStateStruct:
     grid_v_out: wp.array(
         dtype=wp.vec3, ndim=3
     )  # grid node momentum/velocity, after grid update
+
+    # CPIC colored distance field (thin-boundary colliders; docs in mpm_solver_warp).
+    # Node tag bit layout: bits 2l (valid) and 2l+1 (side) per lane l < MAX_CDF, then
+    # 2 owner-lane bits at OWNER_SHIFT. grid_cdf_d holds the owner lane's unsigned
+    # distance. The *_prev twins hold the previous substep's stamp so the fused
+    # kernel's g2p half reads colors(s-1) while its p2g half reads colors(s); the
+    # split pipeline copies cur -> prev after stamping so both reads see pose(s).
+    # (1,1,1) placeholders until the first add_cdf_collider (lazy allocation).
+    grid_cdf_tag: wp.array(dtype=int, ndim=3)
+    grid_cdf_tag_prev: wp.array(dtype=int, ndim=3)
+    grid_cdf_d: wp.array(dtype=float, ndim=3)
+    grid_cdf_d_prev: wp.array(dtype=float, ndim=3)
+    # per-lane pose/material (length MAX_CDF; g2p_particle cannot take collider
+    # structs, so the ghost projection reads these) and reaction accumulators
+    cdf_lane_center: wp.array(dtype=wp.vec3)
+    cdf_lane_velocity: wp.array(dtype=wp.vec3)
+    cdf_lane_omega: wp.array(dtype=wp.vec3)
+    cdf_lane_center_prev: wp.array(dtype=wp.vec3)
+    cdf_lane_velocity_prev: wp.array(dtype=wp.vec3)
+    cdf_lane_omega_prev: wp.array(dtype=wp.vec3)
+    cdf_lane_friction: wp.array(dtype=float)
+    cdf_lane_type: wp.array(dtype=int)
+    cdf_reaction_force: wp.array(dtype=wp.vec3)
+    cdf_reaction_torque: wp.array(dtype=wp.vec3)
 
 
 # for various boundary conditions
@@ -197,6 +224,33 @@ class SDFCollider:
     force: wp.array(dtype=wp.vec3)
     torque: wp.array(dtype=wp.vec3)
 
+
+
+@wp.struct
+class CDFCollider:
+    # CPIC thin boundary: an OPEN oriented mid-surface stored as a side-signed
+    # distance field plus validity mask in its body frame (geometry.CDFData). Unlike
+    # SDFCollider it has no grid-BC kernel; a stamp kernel writes side/validity bits
+    # into state.grid_cdf_tag each substep and the transfer kernels enforce the
+    # discontinuity. Reaction accumulators live on MPMStateStruct per lane.
+    cdf_val: wp.array(dtype=float, ndim=3)
+    cdf_valid: wp.array(dtype=float, ndim=3)
+    res: int
+    origin: wp.vec3          # body-frame coordinate of voxel index (0,0,0)
+    cell: float              # body-frame metres per voxel (isotropic)
+
+    center: wp.vec3          # world position of the body-frame origin (pivot)
+    quat: wp.quat            # orientation body -> world
+    velocity: wp.vec3        # linear velocity of the pivot (world)
+    omega: wp.vec3           # angular velocity (world)
+
+    band: float              # world metres; nodes with |d| <= band get tagged
+    surface_type: int        # 0 sticky, 1 slip, 2 separable + Coulomb friction
+    friction: float
+    lane: int                # bit lane in grid_cdf_tag, < MAX_CDF
+
+    start_time: float
+    end_time: float
 
 
 @wp.struct
