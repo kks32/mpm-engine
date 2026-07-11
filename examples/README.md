@@ -23,6 +23,8 @@ Pouring:
 - `pour_franka.py`: a Franka pours honey between glasses. It records per-frame metrics,
   wrench readouts for both glasses, and a leak audit. Simulation and rendering can run
   in separate processes on GPU clusters; see the script header and docs/performance.md.
+  `--glass cdf` swaps the analytic SDF glasses for CPIC cavity sheets (thin-boundary
+  colliders, watertight at any wall thickness); the leak audit compares the two.
 - `pour_glass.py`: minimal mesh-to-SDF pour, the API demo for arbitrary watertight mesh
   colliders.
 

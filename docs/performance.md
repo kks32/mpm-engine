@@ -66,6 +66,29 @@ pour from 782 to 344 ms per frame. Colliders whose `modify_bc` is None cannot mo
 between substeps, so their launch boxes are cached until a pose setter invalidates
 them; this is a structural property of the BC list, valid for any scene.
 
+### CPIC thin-boundary colliders (CDF)
+
+CPIC colliders (`add_cdf_collider`, colored distance fields per Hu et al. 2018, see
+AUTHORS.md) sever particle-node transfers across an open oriented sheet, so a wall
+holds at any thickness: the zero-thickness dam test passes with 0 crossings under a
+1 m/s impact, where an SDF needs about two cells of solid. That is their regime.
+For bulky tools the SDF stays the right collider, and the pour A/B quantifies why.
+On the default glass (20 mm wall, 2.7 cells at 96^3) with the CPIC sheet on the
+cavity surface (`glass_cavity_profile`), the 120-frame 96^3 A/B gives: SDF cup
+spill 1.6 percent with 6/18 particles projected at CFL 0.28/0.42; CDF glass spill
+4.2/4.0 percent with max 364/495 particles inside the solid at any instant. The
+CDF glass is watertight through 39 degrees of tilt (2 spilled particles); the gap
+opens as fluid crests the rim, for two reasons inherent to the method. CPIC contact
+is soft, so pressed fluid sits a few millimetres inside the sheet band and the
+solid-interior audit counts it as embedded even though the sheet holds it, and the
+rim carries an untagged exclusion tube of one CDF band (16 mm at 96^3, shrinking
+linearly with dx) that makes the spout sloppier than the SDF's fully resolved rim.
+Cost at 96^3 on CPU with two CDF lanes: the fused pass goes from 25.7 to 37.3 ms
+per substep (the in-kernel tag vote and ghost-velocity path) plus 5.3 ms per
+substep of host-side stamping launches, 5.9 to 9.4 s per frame overall. The stamp
+kernels take live poses by value and stay outside CUDA graph capture; the GPU
+overhead number is a 192^3 Vista gate.
+
 ### Fused particle pass (G2P2G)
 
 The default pipeline runs one particle kernel per interior substep, which gathers
