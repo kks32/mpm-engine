@@ -71,6 +71,13 @@ load step:
   residual on prescribed DOFs. Analytic press check passes: a plate pressing the
   column to 1 percent strain reacts with E A delta / h within 10 percent, linear
   per step (tests/test_implicit_quasistatic.py).
-- Next: gate 2 proper (implicit vs slow-explicit plate press, displacement field and
-  wrench compared), SDF-collider node selection replacing the hand-picked plate
-  plane, then gate 3 (identification equivalence).
+- Gate 2 PASSED (experiments/qs_press_ab.py): the same elastic column pressed 1
+  percent by a plate gives implicit 13.77 N vs explicit 13.43 N (2.5 percent) and
+  top displacement agreeing to 0.02 mm; both sit 6 percent under the idealized
+  E A delta / h, a shared plate-plane discretization offset. The explicit reference
+  needs a damped hold phase (the raw press rings) and matched gravity: set_material
+  defaults g to -9.81, which the first A/B attempt missed and which reads as a
+  large spurious plate force while the column settles.
+- Next: gate 3 (identification equivalence) needs the viscoplastic return mapping
+  in the implicit trial stress (von Mises first, then the dough law); SDF-collider
+  node selection replacing the hand-picked plate plane.
