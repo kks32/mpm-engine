@@ -1076,6 +1076,7 @@ class MPM_Simulator_WARP:
 
         # CPIC node tags under the live collider poses; runs outside any captured
         # graph (the stamp kernel takes the pose struct by value)
+        self._cdf_lag_prev = False
         self._stamp_cdf(dt, device)
 
         if sparse:
@@ -1279,8 +1280,9 @@ class MPM_Simulator_WARP:
                     )
             if self.modify_bc[k] is not None:
                 self.modify_bc[k](self.time, dt, self.collider_params[k])
-        # CDF collider poses advance with the same per-substep cadence as modify_bc
-        self._integrate_cdf_poses(dt)
+        # CDF collider poses advance with the same per-substep cadence as modify_bc;
+        # the prev-copy timing follows the calling pipeline (see _stamp_cdf)
+        self._integrate_cdf_poses(dt, lag_prev=getattr(self, "_cdf_lag_prev", False))
 
     def _p2g2p_tail(self, dt, device):
         """Rigid-body update + time advance (shared by both substep pipelines)."""
@@ -1353,6 +1355,11 @@ class MPM_Simulator_WARP:
         )
         for s in range(substeps):
             graph_ran = False
+            # CPIC tags, fused discipline: prev := colors(s-1) for the gather half,
+            # cur := colors(s) for the scatter half; stays outside the captured
+            # graph (live pose by value), which only ever READS the tag grids
+            self._cdf_lag_prev = True
+            self._stamp_cdf(dt, device, lag_prev=True)
             # zero with the union rule (nodes leaving the moving box are cleared once)
             gbox = (self.grid_launch_box
                     if (self.restrict_grid and self.grid_launch_box) else None)
@@ -1473,7 +1480,13 @@ class MPM_Simulator_WARP:
             self.time = self.time + dt
 
         # epilogue: bring particle state up to the end of the tick so exports, the
-        # audit, and the next tick's prologue see exactly what p2g2p would produce
+        # audit, and the next tick's prologue see exactly what p2g2p would produce.
+        # Its gather reads the LAST substep's grid state, so the tag prev buffers
+        # must hold that substep's colors (the lane-pose prev already does).
+        if self.mpm_model.n_cdf > 0 and self._cdf_prev_stamp_box is not None:
+            lo, dims = self._cdf_prev_stamp_box   # the box the last stamp covered
+            wp.launch(cdf_copy_prev, dim=dims,
+                      inputs=[self.mpm_state, wp.vec3i(*lo)], device=device)
         with wp.ScopedTimer("g2p", synchronize=self.profile, active=self.profile,
                             print=False, dict=self.time_profile):
             wp.launch(kernel=g2p, dim=self.n_particles,
