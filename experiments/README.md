@@ -59,12 +59,3 @@ Floods:
 - `flood_sweep.py`: truck displacement and yaw over a grid of flood depths and surge
   velocities, using `warpmpm.vehicle.FloodScene` (the study form of
   `examples/flood_vehicle.py`).
-
-Implicit solver (Phase 4b, docs/implicit_plan.md):
-
-- `qs_prototype.py`: numpy prototype of the quasi-static implicit formulation
-  (matrix-free Newton-Krylov, Hencky stress, quadratic B-splines); gate 1, the
-  analytic equilibrium column.
-- `qs_press_ab.py`: gate 2, the same elastic column pressed by a plate in the
-  implicit solver and in the explicit engine (slow press, then a damped hold for
-  the static reaction); forces agree to 2.5 percent.
