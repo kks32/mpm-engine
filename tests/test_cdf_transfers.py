@@ -121,5 +121,39 @@ def test_ghost_friction_slides_and_holds():
     assert slid["slip"] > 0.01
 
 
+def test_moving_wall_sweeps_without_leaks():
+    """A vertical CDF wall driven into a resting blob at 0.5 m/s: every particle
+    ends up pushed ahead of the wall; none tunnels behind it (the separation push
+    plus color persistence carry particles the wall overtakes)."""
+    pos = _water(0.22, 0.30, 0.14, 0.26, 3 * DX, 3 * DX + 0.08)
+    s = _solver(pos)
+    x0 = 0.18
+    v_wall = 1.0
+    h = s.add_cdf_collider(_sheet("x"), center=(x0, 0.2, 0.2),
+                           velocity=(v_wall, 0.0, 0.0))
+    t = 0.0
+    for _ in range(40):
+        s.step(2e-4, 10)
+        t += 2e-3
+        wall_x = x0 + v_wall * t
+        behind = int((s.x()[:, 0] < wall_x - 1.5 * DX).sum())
+        assert behind == 0, f"{behind} particles tunneled behind the moving wall"
+    assert wall_x > 0.25, "the wall did sweep through the blob's initial region"
+    _ = h
+
+
+def test_fast_wall_warns_on_band_sweep():
+    """Past the per-substep sweep limit (band per substep) the tunneling guard
+    warns once, mirroring the SDF collider's contract."""
+    pos = _water(0.14, 0.20, 0.14, 0.26, 3 * DX, 3 * DX + 0.05)
+    s = _solver(pos)
+    band = 2.0 * DX
+    v_wall = 2.0 * band / 2e-4          # sweeps 2 bands per substep
+    s.add_cdf_collider(_sheet("x"), center=(0.3, 0.2, 0.2),
+                       velocity=(v_wall, 0.0, 0.0))
+    with pytest.warns(RuntimeWarning, match="sweeps"):
+        s.step(2e-4, 1)
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
