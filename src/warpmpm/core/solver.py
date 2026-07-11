@@ -1,9 +1,9 @@
-"""Device-auto Solver: a typed wrapper over the warp-mpm fork.
+"""Typed wrapper around the warp-mpm fork.
 
 Centralizes device handling, Warp init, and the common load/material/collider/step/export
 calls, so scenes, tests, and the coupling backend never touch the raw fork or sys.path.
-The default ``device="auto"`` resolves to ``cuda:0`` when a CUDA GPU is present and to
-``cpu`` otherwise (Apple Silicon); pass ``device="cuda:1"`` or ``device="cpu"`` to pin.
+``device="auto"`` selects ``cuda:0`` when CUDA is available and ``cpu`` otherwise.
+Pass an explicit device string to override it.
 """
 from __future__ import annotations
 
@@ -56,43 +56,35 @@ class GridConfig:
 
 @dataclass
 class Solver:
-    """Owner of one MPM_Simulator_WARP instance; device resolves at load time."""
+    """Wrapper for one MPM_Simulator_WARP instance. Device selection occurs at load time."""
 
     grid: GridConfig = field(default_factory=GridConfig)
     device: str = "auto"
-    # cadence (in control ticks) of the particle-box update + grid-edge guard. Both need a
-    # device-to-host readback of x and v, which is free on CPU but a pipeline sync on CUDA;
-    # GPU runs (where the captured graphs sweep the full grid and ignore the box anyway) can
-    # raise this to amortize the sync, at the cost of the edge guard firing that much later.
+    # Control-tick interval for the particle-box update and grid-edge guard. Both read x and v
+    # from the device. The readback is inexpensive on CPU but synchronizes a CUDA pipeline.
+    # A larger interval reduces those synchronizations but delays the edge check equally.
     guard_interval: int = 1
-    # active-block sparse compute: grid sweeps run over 4^3 blocks containing material
-    # (rebuilt each tick) instead of the dense grid or its bounding box. Wins when the
-    # occupied region is not box-shaped (separated bodies, spread fluid, large empty
-    # domains). Storage stays dense; takes precedence over the CUDA-graph fast path.
+    # Run grid sweeps over active 4^3 blocks, rebuilt each tick, rather than a dense grid or
+    # bounding box. This is intended for separated bodies, spread fluid, and large empty
+    # domains. Storage remains dense, and sparse mode takes precedence over CUDA graphs.
     sparse: bool = False
-    # claymore-style fused particle pass (docs/performance.md): interior substeps of
-    # a tick run one g2p+stress+p2g kernel instead of three particle passes (S+1 passes
-    # per S substeps instead of 3S). Default because it is bitwise-equal to the
-    # three-pass pipeline (verified across material families incl. wrench readout) and
-    # faster everywhere measured (13% on the 192^3 GPU pour, ~4% CPU). Falls back
-    # silently per tick when the scene uses features the fused path excludes (rigid
-    # bodies, particle modifiers, sparse mode). fused=False restores the three-pass
-    # pipeline, which is also the only path with CUDA graph capture (graphs only pay
-    # on small scenes).
+    # Claymore-style fused particle pass; see docs/performance.md. Interior substeps use one
+    # g2p+stress+p2g kernel instead of three particle passes. Rigid bodies, particle modifiers,
+    # and sparse mode fall back to the split path for that tick. Set fused=False to use the
+    # split path globally and enable CUDA graph capture.
     fused: bool = True
     # claymore-style block sort (5a): every `sort_interval` ticks, reorder particles by
     # their 4^3 grid block so P2G atomics from neighboring threads hit neighboring
     # nodes and G2P gathers coalesce (the locality AoSoA buys, in SoA layout). 0 = off.
-    # WARNING: particle index identity changes at sort ticks; keep 0 for runs whose
-    # dumps pair frames by particle index (trajectory-based identification).
+    # Sorting changes particle index identity. Keep this at 0 when dumps pair frames by
+    # particle index, including trajectory-based identification.
     sort_interval: int = 0
-    # per-phase substep profiling: syncs the device around every kernel phase and
-    # accumulates timings (zero/stress/p2g/grid_update/BC/g2p). Forces live launches
-    # (a captured graph cannot be timed per phase), so a profiled run is slower;
-    # the SHARES are the signal. Read the result with profile_report().
+    # Per-phase profiling records zero/stress/p2g/grid-update/BC/g2p timings. It synchronizes
+    # around each phase and forces live launches, making the run slower. Read the accumulated
+    # timings with profile_report().
     profile: bool = False
     # Exported volumes and Cauchy stresses are not physical for det(F) <= 0. "warn"
-    # preserves the validated legacy |det(F)| behavior while making the event visible;
+    # preserves the legacy |det(F)| behavior while making the event visible;
     # "raise" rejects it and "nan" marks invalid particles in fixed-shape exports.
     inversion_policy: str = "warn"
     _sim: Any = field(default=None, init=False, repr=False)
@@ -149,8 +141,8 @@ class Solver:
         )
         if cov is not None and cov_mode == "step":
             # load_initial_data_from_torch calls initialize(), which builds a fresh
-            # mpm_model with update_cov_with_F=False, so the flag has to be set AFTER
-            # load. particle_cov is then cloned from the loaded particle_init_cov (the
+            # mpm_model with update_cov_with_F=False. Set the flag only after loading.
+            # particle_cov is then cloned from the loaded particle_init_cov (the
             # rest-frame covariance), never aliased to it, so per-substep advection
             # starts from the real covariance and leaves init_cov untouched for a later
             # cov_mode switch or a from_F export.
@@ -207,19 +199,23 @@ class Solver:
 
     def add_plane(self, point, normal, surface: str = "sticky", friction: float = 0.0,
                   restitution: float = 0.0) -> Solver:
-        """Grid BCs act on fluid and deformable particles only; a rigid body sails
-        through them. restitution in (0, 1] additionally registers the plane as a
-        rigid-body contact surface (impulse at the deepest penetrating particle),
-        which is the only way a plane stops a rigid body."""
+        """Add a plane boundary condition for fluid and deformable particles.
+
+        Grid boundary conditions do not affect rigid particles. A restitution value in
+        (0, 1] also registers the plane as a rigid-body contact surface, with an impulse
+        applied at the deepest penetrating particle.
+        """
         self._sim.add_surface_collider(tuple(point), tuple(normal), surface,
                                        friction=friction, restitution=restitution)
         return self
 
     def add_box(self, center, half_size, velocity=(0.0, 0.0, 0.0),
                 start_time: float = 0.0, end_time: float = 1.0e9) -> int:
-        """A kinematic box collider (axis-aligned box-SDF) imposing its velocity on the
-        grid nodes it covers. Returns a handle; drive it each control tick with set_box.
-        This is the robot end-effector proxy for the coupling layer."""
+        """Add a kinematic, axis-aligned box-SDF collider.
+
+        The collider imposes its velocity on covered grid nodes. Returns a handle for
+        updates through set_box; the coupling layer uses this collider for robot tools.
+        """
         self._sim.set_velocity_on_cuboid(
             point=tuple(center), size=tuple(half_size), velocity=tuple(velocity),
             start_time=start_time, end_time=end_time,
@@ -227,10 +223,11 @@ class Solver:
         return len(self._sim.collider_params) - 1
 
     def set_box(self, handle: int, center=None, velocity=None) -> Solver:
-        """Update a kinematic box's pose/velocity (called each control tick from the robot
-        end-effector). The fork's modify_bc advances point += dt*velocity on EVERY substep,
+        """Update a kinematic box at the start of a control tick.
+
+        The fork's modify_bc advances point += dt*velocity on every substep,
         so over one tick the box sweeps center -> center + dt_ctrl*velocity. Drive it with
-        the START-of-tick center and the per-tick velocity (vz = (target - prev)/dt_ctrl);
+        the start-of-tick center and the per-tick velocity (vz = (target - prev)/dt_ctrl);
         the box then lands exactly on target by the end of the step. Passing the end-of-tick
         target as center double-applies the motion and leaves the box one tick ahead."""
         p = self._sim.collider_params[handle]
@@ -246,13 +243,14 @@ class Solver:
                 omega=(0.0, 0.0, 0.0), friction: float = 0.05, sticky_cells: float = 1.5,
                 contact_cells: float = 0.5, start_time: float = 0.0,
                 end_time: float = 1.0e9) -> int:
-        """A kinematic open-top glass collider (analytic revolved SDF; profile is a
-        colliders.glass.GlassProfile) at pose (center, wxyz quat), imposing its rigid
-        velocity field on the grid: separable Coulomb-friction contact from contact_cells*dx
-        OUTSIDE the surface (approach is stopped before material can creep into the wall)
-        down to sticky_cells*dx inside it, full grab deeper (anti-tunneling backstop).
-        Returns a handle; drive it each control tick with set_cup. Accumulates the
-        reaction impulse and torque; read with cup_wrench after step()."""
+        """Add a kinematic open-top glass from an analytic revolved SDF.
+
+        ``profile`` is a ``colliders.glass.GlassProfile``, and ``quat`` uses wxyz order.
+        Separable Coulomb contact begins ``contact_cells * dx`` outside the surface and
+        extends to ``sticky_cells * dx`` inside it. Deeper nodes use a full velocity grab
+        as an anti-tunneling backstop. Returns a handle for set_cup and accumulates the
+        reaction impulse and torque read by cup_wrench.
+        """
         from warpmpm.colliders.glass import quat_to_mat
 
         # the sticky core must survive inside the wall: cap the friction shell at just
@@ -269,9 +267,10 @@ class Solver:
         )
 
     def set_cup(self, handle: int, center=None, quat=None, velocity=None, omega=None) -> Solver:
-        """Update a cup's pose/velocities. Same contract as set_box, extended to rotation:
-        pass the START-of-tick pose plus per-tick velocities (v, omega); modify_bc sweeps
-        the cup to the commanded end-of-tick pose over the substeps."""
+        """Update a cup using set_box's start-of-tick contract.
+
+        ``quat`` and ``omega`` extend that contract to rotation.
+        """
         from warpmpm.colliders.glass import quat_to_mat
 
         rot = None if quat is None else quat_to_mat(quat)
@@ -280,18 +279,19 @@ class Solver:
         return self
 
     def reset_cup_wrench(self, handle: int) -> Solver:
-        """Zero a cup collider's reaction impulse + torque accumulators (call before the
-        substeps you want to integrate the wrench over)."""
+        """Zero a cup's reaction accumulators before the substeps to be measured."""
         p = self._sim.collider_params[handle]
         p.force.zero_()
         p.torque.zero_()
         return self
 
     def cup_wrench(self, handle: int, dt: float) -> dict:
-        """Reaction wrench the material exerts on a cup collider: the exact accumulated
-        grid impulse, not a stress integral, since the last reset over elapsed time dt.
-        Returns force[3] and torque[3] (about the cup centre). A static cup holding m kg of
-        settled liquid reads force ~ (0, 0, -m*g), the liquid's weight pressing on the glass."""
+        """Return the cup's accumulated grid-impulse wrench divided by elapsed time ``dt``.
+
+        The result contains ``force[3]`` and ``torque[3]`` about the cup center. A static
+        cup holding ``m`` kilograms of settled liquid reads approximately
+        ``force = (0, 0, -m*g)``.
+        """
         p = self._sim.collider_params[handle]
         return {
             "force": np.asarray(p.force.numpy()[0], dtype=float) / dt,
@@ -299,9 +299,11 @@ class Solver:
         }
 
     def add_domain_walls(self, start_time: float = 0.0, end_time: float = 1.0e9) -> Solver:
-        """Zero outward grid velocity in a 3-cell band at the domain faces, so splashes
-        can never advect particles out of [0, grid_lim]^3 (out-of-domain particles would
-        index the grid out of bounds in p2g)."""
+        """Zero outward velocity in a three-cell band at each domain face.
+
+        This prevents splashes from leaving ``[0, grid_lim]^3`` and indexing the P2G grid
+        out of bounds.
+        """
         self._sim.add_bounding_box(start_time=start_time, end_time=end_time)
         return self
 
@@ -309,10 +311,11 @@ class Solver:
                          velocity=(0.0, 0.0, 0.0), omega=(0.0, 0.0, 0.0), band=None,
                          surface: str = "separable", friction: float = 0.4,
                          start_time: float = 0.0, end_time: float = 1.0e9) -> int:
-        """Add a watertight mesh as a moving/rotating signed-distance-field collider. `sdf` is
-        a warpmpm.geometry.SDFData (built from a mesh). Drive its pose each control tick with
-        set_sdf_pose; read the reaction wrench with sdf_wrench. Returns a handle. This is the
-        general (arbitrary-mesh, oriented) counterpart to add_box for the coupling layer."""
+        """Add a watertight mesh as a moving signed-distance-field collider.
+
+        ``sdf`` is a ``warpmpm.geometry.SDFData`` built from a mesh. Use set_sdf_pose for
+        translation and rotation, and sdf_wrench for its reaction wrench. Returns a handle.
+        """
         return self._sim.add_sdf_collider(
             sdf.values, sdf.grads, sdf.origin, sdf.cell, center, quat=quat, velocity=velocity,
             omega=omega, band=band, surface=surface, friction=friction,
@@ -321,14 +324,15 @@ class Solver:
 
     def set_sdf_pose(self, handle: int, center=None, quat=None, velocity=None, omega=None
                      ) -> Solver:
-        """Update an SDF collider's pose (called each control tick). Same start-of-tick
-        center + per-tick velocity/omega contract as set_box and set_cup; the fork integrates
-        center += dt*velocity and rotates the quat by omega on every substep."""
+        """Update an SDF collider using set_box's start-of-tick contract.
+
+        ``quat`` and ``omega`` extend that contract to rotation.
+        """
         self._sim.set_sdf_pose(handle, center=center, quat=quat, velocity=velocity, omega=omega)
         return self
 
     def reset_sdf_force(self, handle: int) -> Solver:
-        """Zero an SDF collider's reaction force + torque accumulators (call before step())."""
+        """Zero an SDF collider's reaction force and torque before step()."""
         self._sim.collider_params[handle].force.zero_()
         self._sim.collider_params[handle].torque.zero_()
         return self
@@ -343,17 +347,16 @@ class Solver:
         return {"force": f / dt, "torque": t / dt}
 
     def reset_tool_force(self, handle: int) -> Solver:
-        """Zero a box collider's reaction-impulse accumulator. Call before the
-        substeps you want to integrate the force over (typically before step())."""
+        """Zero a box collider's reaction accumulator before the measured substeps."""
         self._sim.collider_params[handle].force.zero_()
         return self
 
     def tool_force(self, handle: int, dt: float) -> np.ndarray:
-        """Reaction force the material exerts on a box collider, from the EXACT grid impulse
+        """Reaction force the material exerts on a box collider, from the grid impulse
         accumulated since the last reset: F = sum_substeps sum_nodes m*(v_free - v_imposed) /
         dt. dt is the elapsed time accumulated over (e.g. substeps*substep_dt). Returns
-        force[3] (compression -> +z). This is the calibrated alternative to the stress
-        integral; no contact band, no T_layer, no gating."""
+        force[3] (compression -> +z). Unlike the stress-integral estimator, this readout
+        uses no contact band, T_layer, or stress gate."""
         impulse = self._sim.collider_params[handle].force.numpy()[0]
         return np.asarray(impulse, dtype=float) / dt
 
@@ -414,10 +417,12 @@ class Solver:
         return "\n".join(lines)
 
     def _update_grid_box(self, dt: float, substeps: int) -> None:
-        """Once per control tick: (a) guard against particles reaching the grid edge,
-        where the quadratic-stencil P2G scatter would write out of bounds (silent memory
-        corruption); (b) set the live particle box, padded for this tick's motion, that
-        the zero/normalize/damping sweeps launch over instead of the full dense grid."""
+        """Check the grid edge and update the particle launch box once per control tick.
+
+        Particles near the edge can make the quadratic P2G stencil write out of bounds.
+        The live launch box is padded for the current tick's motion and replaces a full
+        dense-grid sweep for zeroing, normalization, and damping.
+        """
         x = self.x()
         v = self.v()
         dx = self.grid.dx

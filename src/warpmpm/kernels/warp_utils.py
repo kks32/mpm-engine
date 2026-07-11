@@ -131,8 +131,8 @@ class Dirichlet_collider:
     horizontal_axis_2: wp.vec3
     half_height_and_radius: wp.vec2
 
-    # optional Newton-exact reaction-impulse accumulator (set only by colliders that
-    # measure force, e.g. set_velocity_on_cuboid); harmless/unused for the others
+    # Optional reaction-impulse accumulator. It is set only by colliders that measure
+    # force, such as set_velocity_on_cuboid, and is unused by other colliders.
     force: wp.array(dtype=wp.vec3)
 
 @wp.struct
@@ -142,9 +142,8 @@ class PointCloudCollider:
     end_time: float
 
 
-# kinematic open-top glass (solid of revolution) driven by the robot end-effector:
-# 6-DoF pose + rigid velocity field, analytic profile scalars, and the Newton-exact
-# reaction impulse/torque accumulators (see add_revolved_sdf_collider)
+# Kinematic open-top glass driven by the robot end-effector. Stores a six-DoF pose,
+# rigid velocity field, analytic profile parameters, and reaction-impulse accumulators.
 @wp.struct
 class RevolvedCollider:
     point: wp.vec3          # glass centre (mid-height), world frame
@@ -192,8 +191,8 @@ class SDFCollider:
     start_time: float
     end_time: float
 
-    # Newton-exact reaction accumulators (impulse the material delivers to the collider, world
-    # frame): force = sum_nodes m*(v_free - v_new); torque = sum_nodes (x - center) x impulse.
+    # Reaction accumulators in the world frame. force = sum_nodes m*(v_free - v_new), and
+    # torque = sum_nodes (x - center) x impulse.
     # Reaction wrench = (force, torque) / elapsed dt.
     force: wp.array(dtype=wp.vec3)
     torque: wp.array(dtype=wp.vec3)

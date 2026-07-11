@@ -49,8 +49,8 @@ load step:
    plate wrench agree within tolerance as the explicit run's loading rate goes to
    zero.
 3. Identification equivalence: a dough squeeze whose implicit dump yields the same
-   identified (tau_y, eta) as the explicit dump. This is the gate that matters for
-   the science.
+   identified (tau_y, eta) as the explicit dump. This gate is required before using
+   the implicit path for identification studies.
 
 ## Status
 

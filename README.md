@@ -1,28 +1,35 @@
 # warpmpm
 
-A modular Warp MPM engine for robot manipulation of deformable and granular media:
-dough pressing and shaping, glass-to-glass pouring, granular flows. It couples to
-MuJoCo today and is built with NVIDIA Isaac Lab in mind (Warp to PyTorch is zero-copy
-on CUDA).
+A Warp MPM engine for robot manipulation of deformable and granular materials. The
+examples cover dough pressing and shaping, glass-to-glass pouring, and granular flow.
+The engine currently couples to MuJoCo. Its array interface is also intended for NVIDIA
+Isaac Lab; Warp-to-PyTorch transfers are zero-copy on CUDA.
 
-The core is the validated warp-mpm fork (the kernels behind the TrackEUCLID results)
-wrapped behind a typed `Solver`, with an explicit MLS/APIC step: a claymore-style fused
-G2P2G particle pass, AABB-restricted grid launches, mass-gated colliders, an active-block
-sparse mode, CUDA graph capture, and per-phase profiling. Every optimization keeps the
-default pipeline bitwise-identical to the pre-optimization solver; see Performance.
+The numerical core is a fork of warp-mpm, whose kernels were used for the TrackEUCLID
+results. A typed `Solver` wraps its explicit MLS/APIC step. The default transfer path
+uses a fused G2P2G particle pass based on Claymore's design. Other options restrict grid
+launches to AABBs, skip empty collider nodes, activate sparse grid blocks, capture CUDA
+graphs, and collect per-phase timings. Measurements and regression tests are in
+[Performance](#performance) and [docs/performance.md](docs/performance.md).
 
 ## Design
 
-```
-robot sim (MuJoCo / Isaac) ── link poses, velocities ──▶ warpmpm
-                            ◀── per-link 6D wrench, contact obs ──
+```text
+robot simulator         coupling adapter             warpmpm
+---------------         ----------------             -------
+tool pose + velocity ─▶ collider command ──────────▶ particles + grid contact
+robot controller     ◀─ contact force + torque ◀──── grid impulse / stress integral
 ```
 
-The MPM owns the material and the robot sim owns the robot; the coupling exchanges
-compact wrenches rather than particles. 13 materials (Newtonian/Bingham/Herschel-Bulkley
-dough, mu(I) sand incl. tabulated laws, elastic, von Mises, weakly compressible fluid).
+The robot simulator advances the robot, while `warpmpm` advances the material. They
+exchange link kinematics and reaction wrenches; particle state remains in the MPM
+solver. Contact is resolved inside `warpmpm` by collider boundary conditions on the
+grid. The coupling adapter converts those contact results to a wrench for the robot
+controller. The package contains 13 material models, including Newtonian, Bingham, and
+Herschel-Bulkley dough; mu(I) sand with tabulated laws; elastic and von Mises solids;
+and a weakly compressible fluid.
 
-What exists:
+Code structure overview:
 
 - `core/solver.py`: device-auto `Solver` (cuda:0 when present, cpu otherwise) with
   load / material / collider / step / export, `GridConfig`, and the pipeline flags
@@ -36,47 +43,22 @@ What exists:
 - `geometry/`: watertight mesh to SDF (winding-number sign), cached; cup meshes.
 - `colliders/glass.py`: analytic revolved glass profile, cavity/solid masks, leak
   projection.
-- `coupling/`: grid-impulse and stress-integral contact-wrench readouts; the grid-impulse
-  wrench is the exact accumulated grid impulse rather than a stress integral. Two-way
-  force feedback halts the arm on the dough.
+- `coupling/`: contact-wrench readouts based on accumulated grid impulse or a stress
+  integral. The grid-impulse readout sums the impulses applied by collider boundary
+  conditions at grid nodes. Force-feedback controllers use the quasi-static
+  stress-integral signal to stop a press at a specified reaction force.
 - `splats/`: Gaussian-splat scenes, PhysGaussian style. PLY load/save, interior fill,
   per-particle covariance advection and polar-rotation SH; see `examples/splat_sim.py`.
 - `adapters/mujoco_adapter.py`: Franka arm, scripted press and pour kinematics,
   composite offscreen rendering of arm + glasses + particles.
 - `src/ident/`, `src/common/`: the warp-free EUCLID identification stack (weak-form
   constitutive recovery); an import-boundary test keeps it free of warp/torch.
-- `examples/`: one demo per capability (pour, force-feedback press, gripper
-  shaping, squeeze identification, wrist-FT cross-check, shear-cell rheology, surface
-  render), sharing helpers through `examples/common.py`; `examples/recovery/` holds
-  the constitutive-recovery examples. See `examples/README.md`.
+- `examples/`: scripts for pouring, force-feedback pressing, gripper shaping, squeeze
+  identification, a wrist-FT cross-check, shear-cell rheology, and surface rendering.
+  Shared helpers are in `examples/common.py`, and constitutive-recovery examples are in
+  `examples/recovery/`. See `examples/README.md`.
 - `experiments/`: the paper studies and figure scripts, kept runnable for
   reproducibility and mapped to the results they produce in `experiments/README.md`.
-
-## Performance
-
-Measured on the 192^3 honey pour (340k particles, 432 substeps/frame, GH200):
-
-| stage | sim ms/frame |
-| --- | --- |
-| before this optimization pass | 782 |
-| + mass-gated colliders, shelled walls | 319 |
-| + fused G2P2G | 278 |
-
-CPU (Apple Silicon, collider-heavy fluid scene): 3.0 to 3.2x over the same baseline.
-All of it with bitwise-identical trajectories, deformation gradients, and stress against
-the pre-optimization engine, and identical identification results downstream.
-
-Solver flags (all default-off except `fused`):
-
-- `fused=True` (default): one fused g2p+stress+p2g particle pass per interior substep
-  instead of three passes. Bitwise-identical to the three-pass path; falls back per tick
-  for rigid bodies, particle modifiers, or sparse mode. `fused=False` restores the
-  three-pass path, the only path with CUDA graph capture.
-- `sparse=True`: active-block grid sweeps for scenes whose occupancy is not box-shaped.
-- `sort_interval=K`: claymore-style block sort of particle storage every K ticks
-  (GPU locality; changes particle index identity, so keep 0 for index-paired dumps).
-- `profile=True`: per-phase substep timing table via `Solver.profile_report()`.
-- `guard_interval=K`: amortize the grid-edge guard readback.
 
 ## Quickstart
 
@@ -92,13 +74,38 @@ On clusters where GL and CUDA must not share a process (GH200 nodes), use `--rec
 the simulation dumps per-frame render state and re-invokes itself as a GL-only
 subprocess (`--render-only`), with frames split across parallel workers.
 
+
+## Performance
+
+Measured on the 192^3 honey pour (340k particles, 432 substeps/frame, GH200):
+
+| stage | sim ms/frame |
+| --- | --- |
+| before this optimization pass | 782 |
+| + mass-gated colliders, shelled walls | 319 |
+| + fused G2P2G | 278 |
+
+On Apple Silicon CPU, collider-heavy fluid scenes ran 3.0 to 3.2 times faster than the
+same baseline. The equivalence guarantee, test coverage, and CPU caveats are documented
+in [docs/performance.md](docs/performance.md).
+
+`fused` defaults on; the other solver flags default off:
+
+- `fused=True`: one fused g2p+stress+p2g particle pass per interior substep instead of
+  three passes. It falls back per tick for rigid bodies, particle modifiers, or sparse
+  mode. `fused=False` restores the three-pass path, which supports CUDA graph capture.
+- `sparse=True`: active-block grid sweeps for scenes whose occupancy is not box-shaped.
+- `sort_interval=K`: claymore-style block sort of particle storage every K ticks
+  (GPU locality; changes particle index identity, so keep 0 for index-paired dumps).
+- `profile=True`: per-phase substep timing table via `Solver.profile_report()`.
+- `guard_interval=K`: amortize the grid-edge guard readback.
+
 ## License, provenance, acknowledgments
 
-MIT ([LICENSE](LICENSE)) for the group's code. The vendored core in
-`src/warpmpm/kernels/` derives from the upstream UCLA warp-mpm (no license file
-upstream); boundary in [AUTHORS.md](AUTHORS.md).
-
-Full provenance with BibTeX in [AUTHORS.md](AUTHORS.md). In short:
+The group's code is MIT-licensed; see [LICENSE](LICENSE). The vendored core in
+`src/warpmpm/kernels/` derives from the upstream UCLA warp-mpm, which has no license
+file. [AUTHORS.md](AUTHORS.md) records the licensing boundary, full provenance, and
+BibTeX entries. A summary follows:
 
 - The numerical core began as the UCLA **warp-mpm** of Zeshun Zong and collaborators
   (Chenfanfu Jiang's group; cite Zong et al. SIGGRAPH Asia 2023 and PhysGaussian),

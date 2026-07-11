@@ -1,9 +1,10 @@
-"""Cup-collider (pouring) tests, physics-grounded like the engine tests: a static cup
-must HOLD water with zero wall penetration and read the water's weight on its
-Newton-exact wrench; a tilt below the spill angle must lose nothing; a hard tilt must
-pour the water OUT while conserving the particle count and never leaving material
-embedded in the glass. All on coarse grids for speed; the true-scale run lives in
-examples/pour_franka.py."""
+"""Cup-collider tests for static holding and pouring.
+
+A static cup must hold water without wall penetration and report its weight through the
+grid-impulse wrench. A tilt below the spill angle must retain every particle. A larger
+tilt must pour while conserving particle count and leaving no material embedded in the
+glass. These tests use coarse grids; examples/pour_franka.py contains the full-scale run.
+"""
 from __future__ import annotations
 
 import numpy as np

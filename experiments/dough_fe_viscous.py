@@ -1,10 +1,9 @@
 """Function-encoder recovery of a 3D dough's apparent viscosity eta_app(gamma_dot).
 
-Tests whether the learned viscous basis beats a fixed 2-parameter Bingham fit when the dough
-is genuinely shear-thinning (Herschel-Bulkley, n<1), a curve a Bingham model structurally
-cannot represent. We press a 3D dough blob at three plate speeds (to excite a range of shear
-rate), read the Newton-exact grid-impulse force each frame, and use the mechanical power
-balance
+The experiment compares a learned viscous basis with a two-parameter Bingham fit for
+Herschel-Bulkley shear thinning, which the Bingham model cannot represent. It presses a
+3D dough sample at three plate speeds, records the grid-impulse force, and uses the
+mechanical power balance
 
     INT eta_app(gd) gd^2 dV = P_plate + P_grav - dKE ,   P_plate = v_plate * F (measured),
 

@@ -2,8 +2,8 @@
 
 These are the gray-speckle particle videos (front orthographic, per-particle brightness =
 material-locked texture), as opposed to the marching-cubes surface render. Re-runs the same
-quasi-2D plane-strain squeeze as the real-data datasets and renders via the validated
-perception speckle renderer. Run:  python experiments/speckle_particle_videos.py
+quasi-2D plane-strain squeeze as the real-data datasets and uses the perception speckle
+renderer. Run:  python experiments/speckle_particle_videos.py
 """
 from __future__ import annotations
 

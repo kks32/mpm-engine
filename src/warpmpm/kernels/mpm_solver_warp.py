@@ -985,7 +985,7 @@ class MPM_Simulator_WARP:
                               inputs=[self.mpm_state, self.mpm_model, b["union_list"], bd_v],
                               device=device)
         elif use_graph:
-            # graphs zero and normalize the FULL grid (dense sweeps are cheap on GPU;
+            # graphs zero and normalize the full grid (dense sweeps are cheap on GPU;
             # the box restriction stays a CPU optimization), so no union bookkeeping
             self._prev_grid_box = None
             wp.capture_launch(self._graph_A)

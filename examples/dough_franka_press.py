@@ -1,14 +1,12 @@
-"""Two-way force-feedback Franka press.
+"""Force-regulated Franka press with MPM contact feedback.
 
 A first-order admittance law regulates the end effector: the gripper descends until the
-dough's measured reaction reaches a target force, then holds. The stopping depth is
-decided by the material, which is what keeps the arm from driving through to the floor.
+dough's measured reaction reaches a target force, then holds that position.
 Each control tick reads the reaction wrench, picks a descent velocity from the admittance
 law, drives the MPM tool for one tick of substeps, and reads the new reaction. The MuJoCo
 Franka is posed by inverting its end-effector kinematics so the gripper tip tracks the
 tool in one shared metric frame. Renders a composite view with a live force and depth
-readout, and returns metrics (penetration, force balance, halt) for headless sweeps and
-tests.
+readout. The returned metrics cover penetration, force balance, and stopping behavior.
 
 Run:  python examples/dough_franka_press.py
 """

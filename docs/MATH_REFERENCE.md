@@ -1,10 +1,18 @@
-# TrackEUCLID Mathematical Reference (docs/MATH_REFERENCE.md)
+# TrackEUCLID mathematical reference
 
-Math authority for all phases. When code and this document disagree, the document wins. G0 is the executable arbiter of every convention. Function-encoder training mathematics lives in docs/FUNCTION_ENCODER.md (Phase 3); only its interface contract appears here.
+This document defines the mathematical conventions for all phases, with executable
+checks in G0. If code and this document disagree, this document is authoritative.
+Function-encoder training is specified in docs/FUNCTION_ENCODER.md; only its interface
+contract appears here.
 
 ## 0. Coordinate convention (read first)
 
-Config A (quasi-2D, plane strain): x horizontal, z vertical UPWARD, y out-of-plane. In-plane fields depend on (x, z, t) only; v_y = 0 and w_y = 0. The in-plane gravity vector is g = (0, -g_mag) with g_mag = 9.81. The out-of-plane normal stress is sigma_yy; it exists in plane strain and never enters in-plane rows. Scalar-gravity formulas (with explicit signs) appear ONLY inside common/conventions.py helpers and in Section 5 below; all assembly formulas use the gravity vector.
+Config A is quasi-2D plane strain: x is horizontal, z is positive upward, and y is
+out of plane. In-plane fields depend only on (x, z, t), with v_y = 0 and w_y = 0.
+The in-plane gravity vector is g = (0, -g_mag), where g_mag = 9.81. Plane strain
+retains sigma_yy, although it does not enter in-plane rows. Scalar-gravity formulas
+and their signs are centralized in common/conventions.py and Section 5; assembly
+uses the gravity vector.
 
 ## 1. Continuum setting and constitutive family
 
@@ -17,13 +25,13 @@ Config A (quasi-2D, plane strain): x horizontal, z vertical UPWARD, y out-of-pla
   I = |gamma_dot|_eps d / sqrt(p / rho_s)
   tau = mu(I) p (2 D / |gamma_dot|_eps)
 
-Pressure from a dumped 3D Cauchy stress, ALWAYS the 3D trace, never the 2D trace:
+Pressure from a dumped 3D Cauchy stress uses the full 3D trace, not the in-plane trace:
 
   p = -( sigma_xx + sigma_yy + sigma_zz ) / 3
 
 implemented once as conventions.pressure_from_cauchy_3d_trace(...) with a unit test in which sigma_yy is nonzero.
 
-Linear basis, load-bearing: mu(I) = sum_k theta_k phi_k(I).
+The solve uses the linear basis mu(I) = sum_k theta_k phi_k(I).
 
 Dictionary modes behind one interface (Section 7):
 - Mode C: phi_1 = 1.
@@ -54,7 +62,9 @@ Eulerian, fully weak, using incompressibility, constant rho, compact w, and oute
 
   INT_Q rho a . w = - INT_Q rho [ v . dw/dt + (v (x) v) : grad w ]   (M2)
 
-(x) denotes the tensor outer product, NOT a cross product. Both (M1 with measured a) and (M2 or the Lagrangian variant) are always implemented and reported; disagreement is a refusal component.
+(x) denotes the tensor outer product rather than a cross product. Both M1 with
+measured a and M2, or its Lagrangian variant, are implemented and reported.
+Disagreement is a refusal component.
 
 ### 2.3 Momentum-closure diagnostic
 
@@ -66,11 +76,11 @@ Particle quadrature INT f dV approx SUM_p V_p f(x_p); trapezoid in time. Converg
 
 ### 2.5 Production estimator on MPM data: grid-consistent (Bubnov-Galerkin) assembly
 
-The analytic bump test functions of Sections 2-3 are the basis of G0 and of the divergence-free pressure analysis, but sampling them directly at MPM particle positions gives a biased estimator whose answer tracks the patch radius: on the constant-mu collapse (truth 0.38) the recovered mu rises monotonically from 0.13 at a 3-cell radius to 0.61 at 16 cells, with no clean limit, and the bias survives changes of particle count and of acceleration source. The production estimator instead takes the test functions from the simulator's own discrete space (the Bubnov-Galerkin choice, as in EUCLID, where the weights are the same nodal shape functions that interpolate the field): the background quadratic B-spline grid basis, reconstructed from particle positions and dx, with the internal force assembled through the same grad N_i operator P2G uses (ident/weakform/grid_assembly.py:assemble_grid_consistent). On the same dump this recovers mu = 0.384 at dx = 4 mm and 0.379 at dx = 2.67 mm, converging under grid refinement, and the estimate is stable under row stride and mask-threshold changes at the few-percent level.
+The analytic bump test functions of Sections 2-3 are the basis of G0 and of the divergence-free pressure analysis, but sampling them directly at MPM particle positions gives a biased estimator whose answer tracks the patch radius: on the constant-mu collapse (truth 0.38) the recovered mu rises monotonically from 0.13 at a 3-cell radius to 0.61 at 16 cells, with no clear limit, and the bias survives changes of particle count and of acceleration source. The production estimator instead takes the test functions from the simulator's own discrete space (the Bubnov-Galerkin choice, as in EUCLID, where the weights are the same nodal shape functions that interpolate the field): the background quadratic B-spline grid basis, reconstructed from particle positions and dx, with the internal force assembled through the same grad N_i operator P2G uses (ident/weakform/grid_assembly.py:assemble_grid_consistent). On the same dump this recovers mu = 0.384 at dx = 4 mm and 0.379 at dx = 2.67 mm, converging under grid refinement, and the estimate is stable under row stride and mask-threshold changes at the few-percent level.
 
 The two test-function families trade off against each other, and the choice couples to the pressure source:
 
-- Divergence-free bumps annihilate the pressure-gradient term, so a closure pressure enters only multiplicatively and the induced bias is the clean row-weighted mean of p_true/p_est of Section 5 (measured on the collapse: P0 and P1 under-predict the flowing-region pressure by roughly 1.7x, so mu is over-estimated by the same factor). Their weakness is the patch-scale bias above when sampled at raw particles.
+- Divergence-free bumps annihilate the pressure-gradient term, so a closure pressure enters only multiplicatively and the induced bias is the row-weighted mean of p_true/p_est from Section 5 (measured on the collapse: P0 and P1 under-predict the flowing-region pressure by roughly 1.7x, so mu is over-estimated by the same factor). Their weakness is the patch-scale bias above when sampled at raw particles.
 - Grid-consistent B-spline functions are unbiased at finite resolution but are not divergence free, so the pressure gradient is a first-class term in b and the assembly needs the true (dumped) pressure. Feeding a P0/P1 closure breaks the balance outright (measured: mu_hat 0.07 to 0.08 vs truth 0.38).
 
 The grid-consistent form with true pressure is the production method for all oracle-MPM gates; the bump form is retained for G0, for manufactured solutions, and for closure-pressure analysis on reconstructed smooth fields (Section 6.5), where it is both admissible and pressure-insensitive. When this document's bump prescription and the grid-consistent code disagree on an MPM dump, the grid-consistent code is the production method and this note records why, not a violation of the code-follows-document rule.
@@ -108,7 +118,8 @@ Flowing mask: |gamma_dot|_eps > gamma_min (0.5 / s) AND I > I_min (1e-4). Validi
 
 ## 5. Pressure closures (signs derived, not assumed)
 
-Vertical momentum with z upward, g_z = -g_mag, neglecting the deviatoric-stress divergence and horizontal coupling (exactly the neglect G1P prices):
+Vertical momentum with z upward and g_z = -g_mag, under the G1P approximation that
+neglects deviatoric-stress divergence and horizontal coupling:
 
   rho a_z = - d p / d z + rho g_z      =>      d p / d z = rho (g_z - a_z)
 
@@ -117,11 +128,11 @@ Integrating downward from the free surface where p(h) = 0:
   P1:  p(x, z, t) = INT from z to h(x,t) of rho ( a_z(x, z', t) + g_mag ) dz'
   P0:  p(x, z, t) = rho g_mag ( h(x, t) - z )         (the a_z = 0 limit of P1)
 
-Required unit tests: P0 returns rho * 9.81 * (h - z) on a static column; P1 reduces to P0 when a_z = 0; both implemented only via conventions helpers, never with locally written signs. P1 is the default CANDIDATE closure; G1P decides admissibility. P2 (frozen-I alternation) is an engineering diagnostic only.
+Required unit tests: P0 returns rho * 9.81 * (h - z) on a static column; P1 reduces to P0 when a_z = 0; both are implemented through the conventions helpers rather than local sign expressions. P1 is the default candidate closure, subject to the G1P admissibility check. P2 (frozen-I alternation) is an engineering diagnostic only.
 
 Bias structure: with p_est = p_true (1 + delta), the constant-mu estimator satisfies, to first order, mu_hat / mu = row-weighted mean of p_true / p_est. Away from the crossover the dominant effect of pressure bias is multiplicative in the recovered friction; near the mu(I) transition pressure also relabels I through I proportional to p^(-1/2) and can alter apparent rate dependence. The region-split diagnostic (8.4) catches both and depends only on locality.
 
-Sensitivity operator: theta(p) = (A^T A + lambda G)^{-1} A^T b; dA has two channels per entry, the multiplicative p factor and the basis argument with d phi_k / d p = (d phi_k / d I)(-I / (2 p)). NOTE: this requires d phi / d I in PHYSICAL I, not d phi / d log10 I; see the interface contract in Section 7. Closed form, finite-difference checked in G0, propagated to var(mu(I)) = phi(I)^T Sigma_theta phi(I), validated against the ensemble.
+Sensitivity operator: theta(p) = (A^T A + lambda G)^{-1} A^T b; dA has two channels per entry, the multiplicative p factor and the basis argument with d phi_k / d p = (d phi_k / d I)(-I / (2 p)). This requires d phi / d I with respect to physical I, not d phi / d log10 I; see the interface contract in Section 7. The closed form is checked by finite differences in G0, propagated to var(mu(I)) = phi(I)^T Sigma_theta phi(I), and compared with the ensemble.
 
 ## 6. Perception and kinematic reconstruction (Config A)
 
@@ -156,7 +167,7 @@ Homography jitter, mask erosion/dilation 1 to 2 px, surface method (SDF vs colum
 
 ## 7. Dictionary interface (binding contract; Mode F details in docs/FUNCTION_ENCODER.md)
 
-Assembly and solve code NEVER sees log coordinates. The interface takes physical inertial number I:
+Assembly and solve code accepts the physical inertial number I, not log coordinates:
 
   Dictionary.K -> int
   Dictionary.phi(I: ndarray) -> ndarray (len(I), K)
@@ -177,7 +188,7 @@ Encoding-through-linear-functionals lemma (why Mode F composes with EUCLID): the
 
 8.3 Ensemble posterior: mixture over members; envelope and quantiles; analytic pressure-sensitivity bands overlaid, agreement reported.
 
-8.4 Region-split same-I consistency: R_front = flowing rows with front distance in [c_f d, 2 c_f d]; R_bulk = front distance > 4 c_f d and depth > 2 c_s d. Independent solves; agreement evaluated ONLY on the intersection of empirical I supports; require at least half a decade of overlap and at least 20 percent of each set's rows, else return INSUFFICIENT_OVERLAP. Disagreement beyond combined bands at matched I is the designated falsification signal for pressure closure or locality.
+8.4 Region-split same-I consistency: R_front = flowing rows with front distance in [c_f d, 2 c_f d]; R_bulk = front distance > 4 c_f d and depth > 2 c_s d. Independent solves; agreement is evaluated on the intersection of empirical I supports. Require at least half a decade of overlap and at least 20 percent of each set's rows, or return INSUFFICIENT_OVERLAP. Disagreement beyond combined bands at matched I is the falsification signal for pressure closure or locality.
 
 8.5 Sidewall column (Phase 2): f_w = -(2 mu_w p / W) v / |v|_eps; column A[j, wall] = INT (2 p / W)(v / |v|_eps) . w_j; mu_w fixed to tilt value or bounded, never free; principal-angle collinearity report per collapse and stacked; W/d material-variation tolerance fixed in advance: exceed the ensemble 90 percent band or 0.04 in friction coefficient, whichever larger, declares apparatus dependence.
 
@@ -185,8 +196,8 @@ Encoding-through-linear-functionals lemma (why Mode F composes with EUCLID): the
 
 ## 9. G0 protocol (expanded per review)
 
-1. Trivial case FIRST: constant p, constant mu, simple analytic divergence-free v, one bump test function, both sides by dense quadrature. Must match to quadrature error.
-2. Sign-flip NEGATIVE CONTROL: flipping the sign of b or of D[w] must fail by order one, not pass within tolerance. A G0 that cannot fail is not a gate.
+1. Begin with constant p, constant mu, a simple analytic divergence-free v, and one bump test function. Evaluate both sides by dense quadrature; they must match to quadrature error.
+2. As a negative control, flip the sign of b or D[w]. The result must fail by order one rather than pass within tolerance.
 3. Full manufactured solution: analytic v(x, z, t), p(x, z, t), mu(I); convergence under quadrature refinement sets all tolerances.
 4. Derivative cross-checks: dictionary phi / dphi_dI / dphi_dlogI vs finite differences; sensitivity operator vs finite differences; test-function gradients vs finite differences.
 5. Acceleration identity on oracle data: trajectory finite differences vs grid forces (if exposed) vs dv/dt + L @ v; the L-convention probe lives here.

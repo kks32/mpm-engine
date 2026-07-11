@@ -37,7 +37,7 @@ in-plane axes are tagged):
     x        float[F, P, 3]   positions
     v        float[F, P, 3]   velocities
     L        float[F, P, 9]   velocity gradient, row-major 3x3, L_ij=dv_i/dx_j
-    stress   float[F, P, 9]   FULL 3D Cauchy stress, row-major (incl sigma_yy)
+    stress   float[F, P, 9]   full 3D Cauchy stress, row-major (incl sigma_yy)
     volume   float[F, P]      current particle volume (J * V_p^0)
     mass     float[P]         particle mass (constant)
     active   bool[F, P]       selection == 0

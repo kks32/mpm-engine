@@ -1,11 +1,11 @@
-"""Genuine cross-volume held-out test for the real-data pipeline.
+"""Cross-volume held-out test for the real-data pipeline.
 
 realdata_pipeline.run() identifies a law from each volume's own video+force and re-simulates
 it at the same volume, so its 1x/1.5x numbers are per-volume self-consistency, not a held-out
 generalization (the report caption overstated this). This evaluates the full 2x2 matrix: each
 recovered law (identified on 1x, identified on 1.5x) re-simulated at both volumes. The diagonal
-reproduces the self-rollout; the off-diagonal is the true held-out (train on one volume, predict
-the other). The re-sim is the warp-mpm kernel (no CoTracker), so this is cheap.
+reproduces the self-rollout, and the off-diagonal measures transfer between volumes. The
+re-simulation uses the warp-mpm kernel without CoTracker.
 
 Run:  python experiments/volume_holdout_check.py
 """

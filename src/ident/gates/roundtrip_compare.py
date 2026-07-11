@@ -1,13 +1,12 @@
-"""Round-trip replication: does the identified model reproduce the dynamics?
+"""Compare observed dynamics with a rollout of the identified model.
 
-Compares the observable dynamics of an OBSERVED collapse against a collapse
-RE-SIMULATED with the identified constitutive parameters (MATH_REFERENCE.md
-Section 10 observables): front trajectory x_f(t), final deposit profile h(x),
+The comparison uses the observables from MATH_REFERENCE.md Section 10: front
+trajectory x_f(t), final deposit profile h(x),
 runout distance, and deposit area. This is forward validation of an already
 identified model, not rollout-matching training: no simulator differentiation
 (invariant 1).
 
-Pure ident (no warp/torch): operates on two validated dumps.
+This module has no Warp or Torch dependency and operates on two reference dumps.
 """
 
 from __future__ import annotations

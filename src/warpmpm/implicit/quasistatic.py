@@ -28,13 +28,14 @@ f64 = wp.float64
 @wp.kernel
 def _qs_residual(
     x_p: wp.array(dtype=wp.vec3d),
-    F_old: wp.array(dtype=wp.mat33d),
+    b_e: wp.array(dtype=wp.mat33d),       # elastic left Cauchy-Green per particle
     vol0: wp.array(dtype=f64),
     mass: wp.array(dtype=f64),
     u: wp.array(dtype=wp.vec3d),          # grid displacement increment, flat nodes
     gravity: wp.vec3d,
     lam: f64,
     mu: f64,
+    sigma_y: f64,                          # von Mises yield; 0 disables plasticity
     inv_dx: f64,
     ngy: wp.int32,
     ngz: wp.int32,
@@ -80,10 +81,12 @@ def _qs_residual(
                 idx = ((base_x + i) * ngy + (base_y + j)) * ngz + (base_z + k)
                 du_grad += wp.outer(u[idx], gw)
 
-    F_trial = (wp.identity(n=3, dtype=f64) + du_grad) * F_old[p]
+    G = wp.identity(n=3, dtype=f64) + du_grad
+    b = G * b_e[p] * wp.transpose(G)      # trial elastic left Cauchy-Green
 
-    # Kirchhoff stress from Hencky strain: principal-space log of b = F F^T
-    b = F_trial * wp.transpose(F_trial)
+    # Kirchhoff stress from Hencky strain, principal space; radial return for
+    # von Mises (dev tau = 2 mu dev e, so the map scales the deviator in place).
+    # The commit kernel repeats this map to store the returned elastic state.
     Q = wp.mat33d(f64(0.0), f64(0.0), f64(0.0), f64(0.0), f64(0.0), f64(0.0),
                   f64(0.0), f64(0.0), f64(0.0))
     lam2 = wp.vec3d(f64(0.0), f64(0.0), f64(0.0))
@@ -95,6 +98,17 @@ def _qs_residual(
     t0 = lam * tr + f64(2.0) * mu * e0
     t1 = lam * tr + f64(2.0) * mu * e1
     t2 = lam * tr + f64(2.0) * mu * e2
+    if sigma_y > f64(0.0):
+        mean = (t0 + t1 + t2) / f64(3.0)
+        s0 = t0 - mean
+        s1 = t1 - mean
+        s2 = t2 - mean
+        vm = wp.sqrt(f64(1.5) * (s0 * s0 + s1 * s1 + s2 * s2))
+        if vm > sigma_y:
+            sc = sigma_y / vm
+            t0 = mean + sc * s0
+            t1 = mean + sc * s1
+            t2 = mean + sc * s2
     tau_diag = wp.mat33d(t0, f64(0.0), f64(0.0),
                          f64(0.0), t1, f64(0.0),
                          f64(0.0), f64(0.0), t2)
@@ -116,13 +130,18 @@ def _qs_residual(
 @wp.kernel
 def _qs_commit(
     x_p: wp.array(dtype=wp.vec3d),
-    F_old: wp.array(dtype=wp.mat33d),
+    b_e: wp.array(dtype=wp.mat33d),
     u: wp.array(dtype=wp.vec3d),
+    lam: f64,
+    mu: f64,
+    sigma_y: f64,
     inv_dx: f64,
     ngy: wp.int32,
     ngz: wp.int32,
 ):
-    """Converged increment to particles: x += sum w u, F_old = (I + grad du) F_old."""
+    """Converged increment to particles: x += sum w u, and the elastic state advances
+    through the same trial + return map as the residual (the plastic part of the
+    step stays out of b_e, which is what makes the flow permanent)."""
     p = wp.tid()
     one = f64(1.0)
     half = f64(0.5)
@@ -161,7 +180,33 @@ def _qs_commit(
                 idx = ((base_x + i) * ngy + (base_y + j)) * ngz + (base_z + k)
                 du += weight * u[idx]
                 du_grad += wp.outer(u[idx], gw)
-    F_old[p] = (wp.identity(n=3, dtype=f64) + du_grad) * F_old[p]
+    G = wp.identity(n=3, dtype=f64) + du_grad
+    b = G * b_e[p] * wp.transpose(G)
+    if sigma_y > f64(0.0):
+        # twin of the residual's return map: scale the deviatoric Hencky strain so
+        # the stored elastic state sits on the yield surface
+        Q = wp.mat33d(f64(0.0), f64(0.0), f64(0.0), f64(0.0), f64(0.0), f64(0.0),
+                      f64(0.0), f64(0.0), f64(0.0))
+        lam2 = wp.vec3d(f64(0.0), f64(0.0), f64(0.0))
+        wp.eig3(b, Q, lam2)
+        e0 = half * wp.log(wp.max(lam2[0], f64(1e-12)))
+        e1 = half * wp.log(wp.max(lam2[1], f64(1e-12)))
+        e2 = half * wp.log(wp.max(lam2[2], f64(1e-12)))
+        tr = e0 + e1 + e2
+        d0 = e0 - tr / f64(3.0)
+        d1 = e1 - tr / f64(3.0)
+        d2 = e2 - tr / f64(3.0)
+        vm = f64(2.0) * mu * wp.sqrt(f64(1.5) * (d0 * d0 + d1 * d1 + d2 * d2))
+        if vm > sigma_y:
+            sc = sigma_y / vm
+            n0 = tr / f64(3.0) + sc * d0
+            n1 = tr / f64(3.0) + sc * d1
+            n2 = tr / f64(3.0) + sc * d2
+            b_diag = wp.mat33d(wp.exp(f64(2.0) * n0), f64(0.0), f64(0.0),
+                               f64(0.0), wp.exp(f64(2.0) * n1), f64(0.0),
+                               f64(0.0), f64(0.0), wp.exp(f64(2.0) * n2))
+            b = Q * b_diag * wp.transpose(Q)
+    b_e[p] = b
     x_p[p] = x_p[p] + du
 
 
@@ -170,12 +215,16 @@ class QuasiStaticSolver:
 
     Positions and volumes come in like Solver.load_particles; the constitutive law is
     Hencky elasticity (lam, mu from E, nu). Dirichlet conditions are per-node,
-    per-component masks (fix_floor for the common case). solve_gravity ramps gravity
-    over load steps; each step is one Newton solve. Colliders-as-Dirichlet and the
-    tool wrench arrive with gate 2."""
+    per-component masks (fix_floor for the common case) and displacement-controlled
+    tools (prescribe_nodes). yield_stress > 0 turns on rate-independent von Mises
+    plasticity via a radial return in principal Hencky space; the particle state is
+    then the elastic left Cauchy-Green, and plastic flow is what the return map
+    leaves out of it. solve_gravity ramps gravity over load steps; each step is one
+    Newton solve."""
 
     def __init__(self, pos: np.ndarray, vol: np.ndarray, rho: float, E: float,
-                 nu: float, grid: GridConfig, device: str = "cpu"):
+                 nu: float, grid: GridConfig, yield_stress: float = 0.0,
+                 device: str = "cpu"):
         _ensure_warp()
         self.grid = grid
         self.device = device
@@ -185,12 +234,13 @@ class QuasiStaticSolver:
         self.lam = E * nu / ((1 + nu) * (1 - 2 * nu))
         self.mu = E / (2 * (1 + nu))
         self.rho = rho
+        self.sigma_y = float(yield_stress)
         self._vol = vol.astype(np.float64)
         self._mass = rho * self._vol
 
         self.x_p = wp.from_numpy(pos.astype(np.float64), dtype=wp.vec3d, device=device)
-        F0 = np.tile(np.eye(3), (self.n_p, 1, 1))
-        self.F = wp.from_numpy(F0, dtype=wp.mat33d, device=device)
+        b0 = np.tile(np.eye(3), (self.n_p, 1, 1))
+        self.b_e = wp.from_numpy(b0, dtype=wp.mat33d, device=device)
         self.vol0 = wp.from_numpy(self._vol, dtype=f64, device=device)
         self.mass = wp.from_numpy(self._mass, dtype=f64, device=device)
         self.R_wp = wp.zeros(self.n_nodes, dtype=wp.vec3d, device=device)
@@ -250,8 +300,9 @@ class QuasiStaticSolver:
         wp.copy(self.u_wp, wp.from_numpy(u, dtype=wp.vec3d, device=self.device))
         self.R_wp.zero_()
         wp.launch(_qs_residual, dim=self.n_p,
-                  inputs=[self.x_p, self.F, self.vol0, self.mass, self.u_wp,
+                  inputs=[self.x_p, self.b_e, self.vol0, self.mass, self.u_wp,
                           wp.vec3d(0.0, 0.0, -g_now), f64(self.lam), f64(self.mu),
+                          f64(self.sigma_y),
                           f64(1.0 / self.grid.dx), int(self.ng[1]), int(self.ng[2]),
                           self.R_wp],
                   device=self.device)
@@ -293,12 +344,14 @@ class QuasiStaticSolver:
                                for ax in range(3)]))
             if verbose:
                 print(f"load step {step}: g={g_now:.2f} iters={it} |R|={rn:.3e}")
-            # commit: particle positions and F advance; masks refresh for the moved
-            # particles (Dirichlet planes are re-applied by the caller if needed)
+            # commit: particle positions and the elastic state advance; masks refresh
+            # for the moved particles (Dirichlet planes re-applied by the caller)
             u_m = (u.reshape(self.n_nodes, 3) * self._mask) + self._u_pre
             wp.copy(self.u_wp, wp.from_numpy(u_m, dtype=wp.vec3d, device=self.device))
             wp.launch(_qs_commit, dim=self.n_p,
-                      inputs=[self.x_p, self.F, self.u_wp, f64(1.0 / self.grid.dx),
+                      inputs=[self.x_p, self.b_e, self.u_wp, f64(self.lam),
+                              f64(self.mu), f64(self.sigma_y),
+                              f64(1.0 / self.grid.dx),
                               int(self.ng[1]), int(self.ng[2])],
                       device=self.device)
         return info
@@ -308,12 +361,13 @@ class QuasiStaticSolver:
         return self.x_p.numpy().copy()
 
     def cauchy_stress(self) -> np.ndarray:
-        """Per-particle Cauchy stress from the committed F (numpy, small n)."""
-        F = self.F.numpy()
-        b = F @ np.transpose(F, (0, 2, 1))
+        """Per-particle Cauchy stress from the committed elastic state (numpy, small
+        n). b_e is post-return-map, so the stress is already on the yield surface."""
+        b = self.b_e.numpy()
         evals, evecs = np.linalg.eigh(b)
         log_e = 0.5 * np.log(np.clip(evals, 1e-12, None))
         tr = log_e.sum(1)
         tau_p = self.lam * tr[:, None] + 2.0 * self.mu * log_e
         tau = np.einsum("nij,nj,nkj->nik", evecs, tau_p, evecs)
-        return tau / np.linalg.det(F)[:, None, None]
+        J_e = np.sqrt(np.linalg.det(b))
+        return tau / J_e[:, None, None]

@@ -1,12 +1,11 @@
 """Force-based identification of von-Mises (G, yield) from one robot squeeze probe.
 
 The observable is the plate reaction force (grid impulse, the wrist-F/T analog) plus
-kinematics; no constitutive parameter is read from the dumped stress except a small
-volumetric (pressure) correction, exactly as the viscoplastic squeeze recovery does
-(squeeze_plate_franka.py).
+kinematics. No constitutive parameter is read from the dumped stress except a small
+volumetric correction, following ``squeeze_plate_franka.py``.
 
-Mechanical power balance over the squeeze (P does no NET unknown work; the volumetric part is a
-known elastic correction):
+Mechanical power balance over the squeeze, with the volumetric part treated as a known
+elastic correction:
     P_internal(t) = P_plate + P_gravity - dKE/dt           (measured, force + kinematics)
     P_internal - P_vol = G * c1(t)  +  yield * c2(t)
         c1 = INT 2 dev(eps):dev(D) dV0   (elastic deviatoric power coefficient, linear in G)
@@ -15,8 +14,9 @@ Two windows make it a pair of convex 1-parameter regressions:
     elastic window (early, pre-yield):  c2 ~ 0  -> G   = sum(P_internal-P_vol) / sum(c1)
     plastic window (late, steady flow):           yield = sum(P_internal-P_vol-G c1) / sum(c2)
 
-The yield recovery rides on the fork's exact yield convention (||dev Kirchhoff||>yield_stress), so
-it is robust to the StVK elastic-predictor stress factor (which only biases the elastic G slightly).
+The recovery uses the fork's yield convention, ``||dev Kirchhoff|| > yield_stress``.
+The StVK elastic-predictor factor therefore affects the recovered G slightly but does not
+change the yield threshold.
 
 Run:  python examples/vonmises_identify.py
 """

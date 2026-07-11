@@ -1,10 +1,11 @@
-"""Predicted vs ground-truth on the unseen volume: side-by-side 3D render + a live force trace.
+"""Compare predicted and reference rollouts for the held-out volume.
 
 Reuses the arm-driven squeeze frames already rendered by rollout_franka_cotracker.py
-(out/rollout_arm/{truth,learned}/), re-captures the Newton-exact grid-impulse plate force per
-frame for each law, and assembles one video: ground-truth render | predicted render, with the
-truth vs predicted plate-force-vs-strain trace below (marker at the current frame). Also writes
-a clean static force graph. Run:  python experiments/rollout_force_video.py
+(``out/rollout_arm/{truth,learned}/``) and records the grid-impulse plate force for each
+law. The output video places the two renders side by side above a force-versus-strain
+trace with a current-frame marker. The script also writes a static force plot.
+
+Run: ``python experiments/rollout_force_video.py``
 """
 from __future__ import annotations
 

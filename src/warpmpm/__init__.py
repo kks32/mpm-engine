@@ -1,8 +1,8 @@
-"""warpmpm: a modular Warp-MPM engine for robot manipulation of deformable and granular
-media (dough first; terrain / rovers next). Today: a dense, explicit MLS/APIC core wrapping
-the validated warp-mpm fork, a kinematic box collider as the robot end-effector proxy, a
-stress-integral reaction-wrench readout, and a MuJoCo coupling adapter. Sparse active-block
-grid + implicit Newton-CG are the planned fast path (see README roadmap)."""
+"""Warp MLS/APIC simulation for robot interaction with deformable and granular materials.
+
+The public package exports the typed solver, material and scene builders, contact-wrench
+readouts, force-feedback controllers, and MuJoCo coupling adapter.
+"""
 from __future__ import annotations
 
 from warpmpm.colliders.glass import GlassProfile, cup_fill

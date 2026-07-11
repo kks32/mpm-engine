@@ -16,8 +16,8 @@ rate of deformation D = sym(grad v) exactly:
 (so dv_x/dx + dv_z/dz = 0). Evaluating the weak form on this smooth field by
 dense quadrature avoids the particle-scatter quadrature bias that the
 grid-consistent assembly was built to dodge; the smooth field plus regular
-quadrature is the G0 regime. This is the engine the G3 rendered-video closure
-feeds; here it is validated on oracle kinematics first.
+quadrature is the G0 regime. The G3 rendered-video closure uses this reconstruction;
+G0 first checks it on oracle kinematics.
 
 Pure ident (numpy + scipy); no warp/torch.
 """

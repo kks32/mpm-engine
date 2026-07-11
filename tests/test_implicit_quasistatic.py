@@ -47,6 +47,32 @@ def test_displacement_press_matches_uniaxial_stiffness():
     assert np.allclose(ratios, 1.0, atol=0.05)
 
 
+def test_vonmises_press_plateaus_at_yield():
+    """Pressing past yield, the plate force must plateau at A sigma_y (uniaxial von
+    Mises with free sides), well below the elastic extrapolation."""
+    dx = 0.03
+    floor_k = 3
+    pos, vol, org = _column(dx=dx, floor_k=floor_k)
+    E, nu, sy = 1.0e5, 0.3, 500.0
+    h, A = 0.36, 0.12 * 0.12
+    qs = QuasiStaticSolver(pos, vol, rho=1000.0, E=E, nu=nu, yield_stress=sy,
+                           grid=GridConfig(n_grid=20, grid_lim=20 * dx), device="cpu")
+    qs.fix_floor(floor_k, components="z")
+    kz = np.arange(qs.n_nodes) % qs.ng[2]
+    plate = qs._active & (kz * dx >= org[2] + h - 0.6 * dx)
+    n_steps, dz = 8, -0.0009                     # 7.2 mm = 2 percent, yield at 0.5
+    qs.prescribe_nodes(plate, (0.0, 0.0, dz), components="z")
+    info = qs.solve_gravity(g=0.0, n_steps=n_steps, newton_max=40)
+
+    F = np.array(info["tool_force"])[:, 2]
+    F_yield = A * sy                              # 7.2 N
+    F_elastic_extrap = E * A * abs(dz) * n_steps / h   # 28.8 N if it never yielded
+    assert abs(F[-1] - F_yield) / F_yield < 0.15, f"plateau {F[-1]:.2f} vs {F_yield}"
+    assert F[-1] < 0.5 * F_elastic_extrap
+    # the last steps are flat (plastic flow), the first step is elastic and linear
+    assert abs(F[-1] - F[-2]) / F_yield < 0.05
+
+
 def test_equilibrium_column_matches_analytic_profile():
     dx = 0.03
     floor_k = 3

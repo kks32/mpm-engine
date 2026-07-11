@@ -1,9 +1,7 @@
-"""Force-feedback controllers that close the robot <-> material loop.
+"""Force-feedback controllers for robot-to-material coupling.
 
-These turn a measured reaction force into the next tool motion, so the MATERIAL decides
-where the end-effector stops instead of a scripted endpoint. This is what makes the
-coupling two-way: press harder than the material can resist and it yields; press to a
-target force and the tool halts at the depth where the reaction balances the command.
+The controllers map a measured reaction force to the next tool command. They can stop a
+press at a target force or let a compliant position target move in response to contact.
 """
 from __future__ import annotations
 
@@ -14,16 +12,15 @@ import numpy as np
 
 @dataclass
 class ForceAdmittance:
-    """First-order vertical admittance: regulate the tool to a target CONTACT force.
+    """First-order vertical admittance for a target contact force.
 
         v_down = clip((f_target - f_react) / damping, -v_max, +v_max)
 
-    f_react is the upward reaction the material exerts on the tool (>=0 in contact). In free
-    space f_react = 0 -> descend at the cap; as the material resists, v_down falls; the tool
-    HALTS where f_react == f_target and then holds that force (v ~ 0 -> static boundary). If
-    the material over-resists, v_down goes negative and the tool retracts, regulating back to
-    f_target. The tool never reaches the floor as long as the material can supply f_target
-    first; a hard z-clamp in the loop is the safety net, not the stopping mechanism.
+    ``f_react`` is the upward force exerted by the material and is nonnegative in contact.
+    In free space, the tool descends at ``v_max``. Its speed falls as the reaction rises and
+    reaches zero at ``f_target``. If the reaction exceeds the target and retraction is
+    enabled, the commanded velocity reverses. The calling loop should still impose a hard
+    z limit as a safety constraint.
 
     damping has units N/(m/s): the contact force error that produces full descent speed is
     f_target at v_max when damping = f_target / v_max.
@@ -51,10 +48,10 @@ class Impedance1D:
 
         m*z'' + b*z' + k*(z - z_ref) = f_react
 
-    A finite stiffness k makes the tool YIELD to the material: with a target z_ref below the
-    surface the tool presses in and settles where k*(z_eq - z_ref) = f_react(z_eq), stopping
-    short of z_ref. Semi-implicit integration with implicit damping (unconditionally stable
-    in b). Use when you want a compliant position target rather than a regulated force.
+    With finite stiffness and ``z_ref`` below the surface, the tool settles where
+    ``k * (z_eq - z_ref) = f_react(z_eq)`` and stops short of ``z_ref``. Integration is
+    semi-implicit with damping treated implicitly. Use this controller for a compliant
+    position target rather than a regulated force.
     """
 
     m: float = 1.0

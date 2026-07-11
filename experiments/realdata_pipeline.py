@@ -250,8 +250,11 @@ def _slab_force_series(scale, tau_y, eta, n_grid=64, v_plate=0.08, press_strain=
 
 
 def rollout_error(tag, device="auto"):
-    """Re-sim the recovered law and compare its force rollout to ground truth, the metric
-    that matters (tau_y/eta trade off; what counts is reproducing the dynamics)."""
+    """Compare the recovered law's force rollout with the reference simulation.
+
+    The rollout comparison accounts for tradeoffs between tau_y and eta that parameter
+    error alone does not show.
+    """
     r = _loadj(OUT / tag / "identify.json")
     scale = _loadj(OUT / tag / "meta.json")["scale"]
     st, F_t = _slab_force_series(scale, *TRUTH, device=device)

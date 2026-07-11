@@ -1,15 +1,11 @@
-"""Render the held-out 3D shear rollout: truth vs FE vs Bingham, with a live force trace.
+"""Render the reference, FE, and Bingham held-out shear rollouts.
 
-Two visuals from experiments/shear_cell_3d.py's recorded rollout (out/shear_cell_3d/rollout_3d.npz):
-  shear_rollout_3d.mp4   3 panels (truth / FE / Bingham) of the dough sheared by the top
-                         wall, particles coloured by speed (the shear gradient), plus a
-                         bottom panel with the live wall shear force for all three. The
-                         shapes track (displacement-controlled) while the force separates:
-                         FE hugs truth, Bingham diverges. This is the self-consistent test.
-  shear_3d_view.mp4      a rotating 3D perspective of the truth block shearing (shows it is
-                         a genuine 3D dough block, not the quasi-2D slab).
+The input is ``out/shear_cell_3d/rollout_3d.npz`` from ``shear_cell_3d.py``.
+``shear_rollout_3d.mp4`` shows the three speed-colored rollouts above their wall-force
+traces. The displacement-controlled shapes remain similar while the forces separate.
+``shear_3d_view.mp4`` is a rotating view of the 3D reference block.
 
-Run:  python experiments/shear_rollout_video.py
+Run: ``python experiments/shear_rollout_video.py``
 """
 from __future__ import annotations
 

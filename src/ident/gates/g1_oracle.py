@@ -1,16 +1,16 @@
-"""G1 oracle gate: identify mu(I) from a warp-mpm dump with TRUE pressure.
+"""G1 oracle gate: identify mu(I) from a warp-mpm dump using simulator pressure.
 
-This is the load-bearing Step 4 of the Phase 1 roadmap: a constant-mu solve
-with the true MPM pressure on oracle dumps. If this fails, nothing else
-matters. The same machinery runs Mode P (PouliquenGridDict) for the later
-stages; the dictionary is the only thing that changes.
+This Phase 1 gate runs a constant-mu solve on oracle dumps with pressure computed from
+the MPM stress. Later stages use the same pipeline with Mode P
+(``PouliquenGridDict``); only the dictionary changes. Later stages require this gate
+to pass.
 
 Pipeline (MATH_REFERENCE.md Sections 4, 2.3, 8):
   1. load + validate dump, build in-plane FrameData with flowing + validity
      masks and the gate-transient time cut.
   2. stratify space-time patches over the valid region (I-decile balanced),
      three test-function rows each.
-  3. momentum-closure diagnostic BEFORE any regression.
+  3. momentum-closure diagnostic before any regression.
   4. assemble A, b_acc (trajectory acceleration) and b_tw (time-weak); solve
      ridge; report mu_hat, cond(A^T A), effective rank, row survival, and the
      acceleration-vs-time-weak agreement.

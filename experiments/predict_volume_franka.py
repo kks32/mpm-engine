@@ -1,18 +1,17 @@
-"""Generalization test: learn the dough on one squeeze, predict a different volume.
+"""Cross-volume test of a dough law identified from one squeeze.
 
-The real test of whether we learned the physics (vs overfit one experiment): take the
-rheology identified from the arm-plate squeeze and use it to predict the plate force on a
-dough of a different size/shape, then compare to the ground-truth simulation. We overlay
-three forward runs on the new (bigger, flatter) blob:
+The script applies the rheology identified from the arm-plate squeeze to a larger,
+flatter dough sample and compares three forward runs:
 
-  - truth                 (tau_y=200, eta=40)    what a real robot would measure
-  - grid-impulse-learned  (tau_y=192, eta=55)    our recovered law (calibrated force)
-  - stress-integral-learned (tau_y=384, eta=56)  the old biased law (uncalibrated force)
+  - reference               (tau_y=200, eta=40)
+  - grid-impulse recovered  (tau_y=192, eta=55)
+  - stress-integral recovered (tau_y=384, eta=56)
 
-If the learned law reproduces the truth on an unseen volume, the rheology transfers. The
-biased law should over-predict, showing why the calibrated grid-impulse force mattered.
-Forces are the Newton-exact grid impulse. Run:
-  python experiments/predict_volume_franka.py
+The comparison uses the collider's accumulated grid-impulse force. The
+stress-integral-derived law is expected to over-predict because that estimator biased the
+identified parameters.
+
+Run: ``python experiments/predict_volume_franka.py``
 """
 from __future__ import annotations
 

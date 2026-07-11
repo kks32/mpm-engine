@@ -1,17 +1,16 @@
 """G1P pressure-closure ablation: the four-curve figure of the project.
 
-For one oracle dump, identify mu(I) three ways that differ ONLY in the
+For one oracle dump, identify mu(I) three ways that differ only in the
 pressure fed to the identifier:
   - true_p: the true MPM 3D stress-trace pressure (the oracle path)
   - P1:     the depth-integrated closure with measured a_z (default candidate)
   - P0:     the hydrostatic closure rho g (h - z)
 
 Uses the grid-consistent (Bubnov-Galerkin) assembler. The flowing-at-yield
-node set is FIXED from the true pressure and reused for all three closures, so
+node set is fixed from the true pressure and reused for all three closures, so
 the only thing that changes is the pressure channel (the multiplicative p
-factor in A and b, and the inertial-number argument). This isolates exactly
-the bias the closures introduce, which is what G1P prices
-(MATH_REFERENCE.md Section 5).
+factor in A and b, and the inertial-number argument). This isolates the bias
+introduced by the closures (MATH_REFERENCE.md Section 5).
 """
 
 from __future__ import annotations

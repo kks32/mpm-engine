@@ -6,8 +6,7 @@ with the law identified from one press probe (vonmises_identify.py).
 
 Engine constraint: the fork's box collider is axis-aligned, so a grip pinches along x or y
 rather than an arbitrary angle. Coupling is sticky without friction, which approximates a
-gripper in the validated regime: normal compression is faithful, and the tangential finger
-drag is a known artifact.
+gripper's normal compression. Tangential finger drag remains a known artifact.
 
 Run:  python -m examples.gripper_shape demo      # multi-grip sculpt demo
       python -m examples.gripper_shape plan      # CEM-plan grips to a target
@@ -212,9 +211,11 @@ def cem_plan_grips(sc, target, params=None, axes=("x", "y"), pop=12, elite=4, n_
 
 
 def plan(device="auto"):
-    """End-to-end: a target is made by a reference grip sequence (TRUE law); the gripper planner
-    reaches it THROUGH THE IDENTIFIED LAW; executed in the TRUE engine. Closes the press->identify->
-    gripper-shape loop."""
+    """Plan with the identified law, then execute the grips with the reference law.
+
+    The target comes from a reference grip sequence. This runs the complete
+    press-to-identification-to-shaping workflow.
+    """
     print("=== gripper shaping to a target (identified-MPM planner) ===", flush=True)
     sc = GripperShapeScene(device=device)
     ref = [("x", 0.14, 0.15, 0.06), ("y", 0.15, 0.16, 0.07)]      # the target-generating grips (TRUE law)

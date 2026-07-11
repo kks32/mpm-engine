@@ -1,12 +1,12 @@
-"""Pinned definitions, coordinate and sign helpers, defaults, seeds.
+"""Shared definitions, coordinate and sign helpers, defaults, and seeds.
 
-Math authority: docs/MATH_REFERENCE.md. G0 is the executable arbiter.
-Config A: x horizontal, z vertical UPWARD, y out of plane. The in-plane
-gravity vector is (0, -G_MAG). Scalar-gravity formulas with explicit signs
-live ONLY in this module; assembly formulas use the gravity vector.
+The mathematical reference is docs/MATH_REFERENCE.md, and G0 checks these conventions.
+In Config A, x is horizontal, z is vertical and positive upward, and y is out of plane.
+The in-plane gravity vector is (0, -G_MAG). Scalar-gravity formulas with explicit
+signs are centralized in this module; assembly formulas use the gravity vector.
 
-All pressure sign conventions route through this module. Pressure from a
-dumped 3D Cauchy stress is ALWAYS the 3D trace, never the 2D trace.
+Pressure sign conventions also pass through this module. Pressure from a
+dumped 3D Cauchy stress uses the full 3D trace, not the in-plane trace.
 """
 
 from __future__ import annotations
@@ -113,7 +113,7 @@ def p1_integrand(rho: np.ndarray, a_z: np.ndarray) -> np.ndarray:
     """Integrand of the P1 closure: dp/dz = rho (g_z - a_z) with g_z = -G_MAG,
     integrated downward from the free surface, gives p(z) = INT_z^h rho (a_z + G_MAG) dz'.
 
-    This helper owns the sign; closures must not write it locally.
+    Keep this sign convention in the helper rather than duplicating it in closures.
     """
     return np.asarray(rho) * (np.asarray(a_z) + G_MAG)
 

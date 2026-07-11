@@ -1,6 +1,8 @@
-"""Two-way coupling tests: the force controllers, the backend contract, and the load-bearing
-property that a force-regulated press into firm dough halts on the dough and never reaches the
-floor (the reaction force, not a scripted endpoint, decides the stopping depth)."""
+"""Tests for force controllers and the robot-to-MPM backend contract.
+
+The force-regulated press test checks that contact feedback stops the tool above the floor
+without a scripted stopping depth.
+"""
 from __future__ import annotations
 
 import numpy as np

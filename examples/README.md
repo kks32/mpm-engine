@@ -1,29 +1,28 @@
 # Examples
 
-One demo per engine capability. Each runs on CPU at a smoke size with no arguments
-(`--device cuda:0` to pin a GPU) and writes to `out/`. Shared helpers live in
-`common.py`: the kernel-matched shear-rate measure, the Chamfer metric, the ffmpeg
-frame encoder, the Franka descent calibration, and particle-cloud surfacing.
+The scripts run at CPU smoke-test size with no arguments and write to `out/`. Pass
+`--device cuda:0` to select a GPU. `common.py` contains the shared shear-rate measure,
+Chamfer metric, ffmpeg frame encoder, Franka descent calibration, and particle-cloud
+surfacing code.
 
 Manipulation and coupling:
 
 - `dough_franka_press.py`: two-way force-feedback press. An admittance law descends the
-  gripper until the measured dough reaction reaches a target force; the material decides
-  the stopping depth.
+  gripper and stops when the measured dough reaction reaches a target force.
 - `squeeze_plate_franka.py`: arm-mounted plate squeeze that recovers the dough's
   (tau_y, eta) from the plate reaction force alone, cross-validated against the 2D
   squeeze-flow result.
-- `wrist_ft_franka.py`: the MPM grid-impulse reaction fed to a dynamic MuJoCo Franka
-  equals the wrist force-torque sensor reading, validating the two-way readout.
+- `wrist_ft_franka.py`: compares the MPM grid-impulse reaction on a dynamic MuJoCo
+  Franka with the wrist force-torque sensor reading.
 - `gripper_shape.py`: press to identify the material, then plan 2-finger grips (CEM over
   grip positions and widths) that sculpt the dough to a target shape. Modes: `demo`,
   `plan`, `video`, `tshape`.
 
 Pouring:
 
-- `pour_franka.py`: A Franka pours honey glass to glass with per-frame
-  metrics, wrench readouts on both glasses, a leak audit, and a record/render process
-  split for GPU clusters (see the header and docs/performance.md).
+- `pour_franka.py`: a Franka pours honey between glasses. It records per-frame metrics,
+  wrench readouts for both glasses, and a leak audit. Simulation and rendering can run
+  in separate processes on GPU clusters; see the script header and docs/performance.md.
 - `pour_glass.py`: minimal mesh-to-SDF pour, the API demo for arbitrary watertight mesh
   colliders.
 

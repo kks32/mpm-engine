@@ -1,17 +1,15 @@
-"""Warp MLS-MPM kernels: the numerical core of the engine.
+"""Warp MLS-MPM kernels used by the engine.
 
-This subpackage holds the explicit MLS-MPM solver (`mpm_solver_warp`), the constitutive
-stress and return-mapping kernels (`mpm_utils`), and the model/state structs (`warp_utils`).
-It began as the UCLA warp-mpm of Zeshun Zong et al. (the base solver, the quadratic
-B-spline transfer, and materials 0-8) and was extended by this group (UT Austin): moving
-robot colliders with a velocity boundary, a Newton-exact grid-impulse contact force,
-a 6-DoF kinematic revolved-SDF glass collider (separable Coulomb contact + wrench/torque
-readout, for pouring), multi-material scenes, a point-cloud loader, and the mu(I) /
-viscoplastic constitutive models (materials 9-13). See AUTHORS.md for attribution and
-citation.
+``mpm_solver_warp`` contains the explicit solver, ``mpm_utils`` contains constitutive
+stress and return-mapping kernels, and ``warp_utils`` defines the model and state structs.
+The base solver, quadratic B-spline transfer, and materials 0-8 derive from the UCLA
+warp-mpm project by Zeshun Zong and collaborators. UT Austin extensions include moving
+robot colliders, grid-impulse force measurement, a six-DoF revolved-SDF glass collider,
+multi-material scenes, a point-cloud loader, and the mu(I) and viscoplastic models in
+material slots 9-13. See AUTHORS.md for attribution and citations.
 
-This is the single import surface for the kernels: the typed `core.Solver` wrapper and the
-`sim/` scenes import `MPM_Simulator_WARP` (and the low-level structs) from here.
+The typed ``core.Solver`` wrapper imports ``MPM_Simulator_WARP`` and the low-level structs
+from this module.
 """
 from __future__ import annotations
 

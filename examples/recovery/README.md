@@ -1,10 +1,10 @@
 # Constitutive recovery examples (EUCLID weak form, no differentiable simulator)
 
-These examples recover a material law from observed kinematics by a convex, linear-in-theta
-weak-form momentum-residual solve. The simulator is never differentiated: the inertia term from
-the observed trajectory supplies the absolute force scale, so the moduli are pinned without a
-force sensor. The forward simulator is the warp MPM engine in this repo (`warpmpm`); the
-recovery is plain numpy least squares.
+These examples recover a material law from observed kinematics with a convex weak-form
+momentum-residual solve that is linear in theta. The solve does not differentiate the
+simulator. Instead, the inertia term from the observed trajectory supplies the absolute
+force scale, so the moduli can be estimated without a force sensor. `warpmpm` supplies the
+forward simulations, and the recovery uses NumPy least squares.
 
 All of these run on the warp engine. The hyperelastic Mooney/Yeoh recovery lives elsewhere
 (it uses the separate JAX `jmpm` engine for its forward model) and is intentionally not here.
@@ -18,10 +18,10 @@ cd mpm_engine
 python -m examples.recovery.elastic_drop
 ```
 
-Outputs (dumps, figures, videos) are written under `mpm_engine/out/`. Some examples consume
-dumps produced by another, so the suggested order is: `elastic_drop` (and its `shape` mode),
-then `sample_complexity`, `elastic_identify_sequential`, `elastic_render`; and `plastic_drop`
-(with `gate`) before `plastic_identify_sequential`.
+Dumps, figures, and videos are written under `mpm_engine/out/`. Some examples consume
+earlier dumps. Run `elastic_drop` and its `shape` mode before `sample_complexity`,
+`elastic_identify_sequential`, and `elastic_render`. Run `plastic_drop gate` before
+`plastic_identify_sequential`.
 
 ## Dependencies
 
@@ -39,24 +39,26 @@ Drop a fixed-corotated (neo-Hookean) blob, observe the bounce, recover the elast
 (mu, lambda -> E, nu) by the convex weak form. The first Piola-Kirchhoff stress is linear in
 the moduli, so the solve is least squares over (test function x frame) rows.
 
-- `python -m examples.recovery.elastic_drop` -> sphere: recover then re-simulate the recovered
-  law. Verified: E recovered to ~0.3 percent; re-sim 1.6 mm RMS over 451 frames.
-- `python -m examples.recovery.elastic_drop shape` -> learn the moduli on a RECTANGLE, predict a
-  held-out STAR bounce. Verified: ~3.4 mm RMS on the unseen geometry.
+- `python -m examples.recovery.elastic_drop` recovers the law from a sphere and then
+  re-simulates it. E is recovered to about 0.3 percent, with 1.6 mm RMS error over 451
+  frames.
+- `python -m examples.recovery.elastic_drop shape` learns the moduli on a rectangle and
+  predicts a held-out star bounce, with about 3.4 mm RMS error.
 - `python -m examples.recovery.elastic_drop errors` -> reconstruction vs generalization error.
 
-The bulk mode (nu) is weakly excited by a bounce and is recovered loosely; that starvation is
-the subject of sample_complexity.py.
+The bounce weakly excites the bulk mode (nu), so its estimate is loose.
+`sample_complexity.py` measures this loss of information.
 
 ### plastic_drop.py
 Plasticine (von-Mises) drop: recover (G, lambda, yield_stress) by the same weak form, with the
 plastic gate. Yield is identifiable only once the material actually yields.
 
-- `python -m examples.recovery.plastic_drop` -> recover from a single yielded drop. Verified:
-  G and yield to ~0.1 percent.
-- `python -m examples.recovery.plastic_drop gate` -> the gate: same drop at two yield stresses;
-  yield is identified in the yielded case and REFUSED (lower bound only) in the elastic case.
-- `python -m examples.recovery.plastic_drop gatefig` -> the gate figure.
+- `python -m examples.recovery.plastic_drop` recovers G and yield to about 0.1 percent
+  from a single yielded drop.
+- `python -m examples.recovery.plastic_drop gate` runs the same drop at two yield
+  stresses. The yielded case identifies the yield stress; the elastic case returns
+  `REFUSED` with a lower bound only.
+- `python -m examples.recovery.plastic_drop gatefig` writes the gate figure.
 
 ### elastic_identify_sequential.py
 Bayesian sequential identifiability: posterior mean and 95 percent credible band of E as more
@@ -67,16 +69,16 @@ impact). `rollout` mode reports rollout RMSE vs number of observed frames.
 - `python -m examples.recovery.elastic_identify_sequential sphere` (or box) for the band figure.
 
 ### plastic_identify_sequential.py
-The plasticine analogue in a recursive-least-squares (RLS) form: (G, lambda, yield) updated
-frame by frame, with the yield refused until the deviatoric strain saturates (the plastic gate
-in time). Needs `plastic_drop gate` to have produced the dumps first. Verified: G and yield to
-~4 percent, yield locks in once the material yields (around t = 0.25 s).
+This example updates (G, lambda, yield) frame by frame with recursive least squares. It
+refuses the yield estimate until the deviatoric strain saturates. Run `plastic_drop gate`
+first to produce the input dumps. G and yield are recovered to about 4 percent, and the
+yield estimate stabilizes after the material yields at about t = 0.25 s.
 
 ### sample_complexity.py
-Gauss-Markov validation of the weak-form recovery: the shear-mode (mu) error falls as
-1/sqrt(N) with the number of weak-form rows, while the bulk mode (lambda) stays high because a
-bounce does not compress enough to excite it (the weak form refusing an uninformative mode).
-Needs `elastic_drop shape` to have produced `box_truth.npz`.
+This script checks the Gauss-Markov scaling of the weak-form recovery. The shear-mode
+(mu) error falls as 1/sqrt(N) with the number of rows. The bulk-mode (lambda) error stays
+high because the bounce provides little compression. Run `elastic_drop shape` first to
+produce `box_truth.npz`.
 
 ### elastic_render.py
 Render the bounce as a shaded, strain-coloured solid: truth law vs recovered law on the star,

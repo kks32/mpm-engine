@@ -22,7 +22,7 @@ Volume transfer and real-data protocol:
 
 - `predict_volume_franka.py`: learn the law on one squeeze, predict plate force on a
   different-volume blob.
-- `predict_volume_rollout.py`: predict deformation of an unseen volume, validated
+- `predict_volume_rollout.py`: predict deformation of an unseen volume and measure it
   through the render-and-CoTracker pipeline.
 - `realdata_pipeline.py`: the real-data-shaped ingest (textured video plus force CSV to
   rheology) exercised on synthetic renders at two volumes.

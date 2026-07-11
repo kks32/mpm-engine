@@ -1,11 +1,10 @@
 # Function-encoder weights
 
-Frozen, deployed function-encoder bases. Each `.npz` is a small tabulation of `K` learned
-basis functions on a fixed input grid, trained by `ident/features/function_encoder_training/`
-and consumed at inference by `ident/features/function_encoder.py` (`FunctionEncoderDict`,
-numpy only, no torch) and by the engine's tabulated materials. They are the deployed artifact,
-not the network: training needs torch, but using these tables does not, so they are committed
-so the numpy-only identifier and the engine re-simulation run without retraining.
+Each `.npz` contains a frozen tabulation of `K` learned basis functions on a fixed input
+grid. Training code is under `ident/features/function_encoder_training/`.
+`FunctionEncoderDict` and the engine's tabulated materials load the files at inference.
+Training requires Torch, but loading the tables is NumPy-only and does not require
+retraining.
 
 Total size ~84 KB. Schema math: `docs/FUNCTION_ENCODER.md`. The trainers write here by default.
 
@@ -37,7 +36,7 @@ Keys per file:
 - `sim/hyperelastic.py` (`recover_fe`, `recover_fe2`) load the two hyperelastic tables.
 - `mpm_engine` examples (`shear_cell_fe`, `shear_cell_3d`, `dough_fe_viscous`) load `viscous.npz` and re-simulate it via the `tabulated_viscous` material.
 
-## Regenerate (writes here by default)
+## Regenerate
 
 ```bash
 python -m ident.features.function_encoder_training.train            # -> granular_mu_i.npz + fe_report.json
@@ -47,7 +46,8 @@ python -m ident.features.function_encoder_training.hyperelastic_train      # -> 
 python -m ident.features.function_encoder_training.hyperelastic_train i2   # -> hyperelastic_2inv.npz
 ```
 
-Seeded (`seed=0`), CPU, a few minutes per basis.
+The trainers write to this directory by default. They use `seed=0` on CPU and take a
+few minutes per basis.
 
 ## Load
 

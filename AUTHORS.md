@@ -1,10 +1,9 @@
 # Authors and provenance
 
-`warpmpm` (this package) is a robot-manipulation MPM engine: a typed solver wrapper, a
-composable material factory, a force-feedback coupling backend, a MuJoCo adapter, and the
-vendored Warp MLS-MPM kernels it drives (`src/warpmpm/kernels/`). The numerical core began as
-an external academic project and was extended by our group. This file records who wrote what
-and what to cite.
+`warpmpm` contains a typed solver wrapper, material factory, force-feedback coupling
+backend, MuJoCo adapter, and vendored Warp MLS-MPM kernels in
+`src/warpmpm/kernels/`. The numerical core began as an external academic project and
+was extended by our group. This file records authorship and citations.
 
 ## Vendored numerical core (`src/warpmpm/kernels/`)
 
@@ -34,6 +33,7 @@ in their published work and must be cited when this engine is used.
 ```
 
 Original upstream contributors (from the fork's git history):
+
 - Zeshun Zong and the MultiPLES group (UCLA): the original solver and base materials.
 - supertan0204: the weakly-compressible fluid material.
 
@@ -46,12 +46,13 @@ License boundary:
 
 ## Group extensions (UT Austin) on top of that core
 
-Layered onto the upstream solver by our group (from git authorship):
+The following attributions come from the repository's git history:
+
 - **Cheng-Hsi Hsiao** (`chhsiao@utexas.edu`): moving robot colliders with a velocity boundary,
   multi-material scenes, rigid-body and restitution boundaries, a point-cloud loader, and the
   Warp 1.x compatibility fixes.
-- **Krishna Kumar** (`krishnak@utexas.edu`): the Newton-exact grid-impulse contact-force
-  (wrist-FT) readout on the velocity collider.
+- **Krishna Kumar** (`krishnak@utexas.edu`): the grid-impulse contact-force (wrist-FT)
+  readout on the velocity collider.
 - **Stepan Tretiakov** (`sdt2344@my.utexas.edu`): CUDA support and auto device resolution
   across the entry points, the Warp 1.14 B-spline transpose fix, and the pressure
   covariance sweep experiment.
@@ -64,9 +65,10 @@ Everything outside `kernels/` (the `Solver` wrapper, `Material` factory, `coupli
 
 ## Borrowed transfer-kernel design: claymore (MIT)
 
-The Step 5 transfer-pipeline optimizations (the fused G2P2G particle pass, per-block
-particle binning/sorting, and the shared-memory arena design earmarked for the CUDA
-follow-up) port the architecture of [ClaymoreUW](github.com/JustinBonus/claymore).
+The fused G2P2G particle pass and per-block particle binning and sorting follow the
+architecture of [ClaymoreUW](https://github.com/JustinBonus/claymore). Its shared-memory
+arena design is reserved for a later CUDA implementation. The design was reimplemented
+in Warp; no Claymore source code was copied.
 
 ```bibtex
 @article{wang2020massively,

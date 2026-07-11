@@ -1,14 +1,14 @@
-"""In-house GNS (Graph Network Simulator) baseline: the RoboCraft/RoboCook/lgbnd learned-dynamics
-approach, reproduced in pure torch (their repos need pytorch3d/torch_geometric/taichi, all absent).
-Architecture is the standard Sanchez-Gonzalez encode-process-decode: a KNN particle graph, node +
-edge MLP encoders, L message-passing steps, a node decoder predicting per-particle displacement.
+"""PyTorch GNS baseline for the shape-planning experiments.
 
-Trained on K warp von-Mises rollouts; used as the forward model for the same CEM shape planner as
-our identified MPM. This is the head-to-head for "how do we do vs a GNS in their setting":
-  * data efficiency: ours needs one force probe; the GNS needs K rollouts to reach a given accuracy.
-  * transfer:        ours is a material law (size-independent); the GNS is trained per-instance.
+The implementation follows the Sanchez-Gonzalez encode-process-decode architecture: a
+KNN particle graph, node and edge MLP encoders, L message-passing steps, and a node
+decoder for per-particle displacement. It avoids the PyTorch3D, torch_geometric, and
+Taichi dependencies used by the reference repositories.
 
-ident/ must never import torch; this lives under mpm_engine/examples (a baseline, not the method).
+The GNS is trained on K Warp von-Mises rollouts and used with the same CEM planner as the
+identified MPM. The identified MPM uses one force probe, while the GNS uses K training
+rollouts. The transfer test compares a size-independent material law with a GNS trained
+for one object size. Torch remains isolated from ``ident/``.
 
 Run:  python -m examples.gns_baseline gen      # generate warp rollout data
       python -m examples.gns_baseline train    # train + 1-step/rollout accuracy vs K

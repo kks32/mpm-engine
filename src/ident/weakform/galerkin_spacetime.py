@@ -1,8 +1,7 @@
-"""Compact space-time divergence-free B-spline test functions (perceived engine).
+"""Compact, divergence-free space-time B-spline test functions.
 
-The robust perceived-data weak form: many compact, local, divergence-free test
-functions, the divergence-free analogue of the grid-consistent nodal balance.
-Each is
+This is the divergence-free analogue of the grid-consistent nodal balance. It uses
+many local test functions of the form
 
     w_{abc}(x, z, t) = curl_xz( eta_a(x) eta_b(z) eta_c(t) e_y )
                      = ( -B_a(x) B'_b(z), +B'_a(x) B_b(z) ) * B_c(t)
@@ -10,10 +9,10 @@ Each is
 with B_a, B_b local cubic streamfunction B-splines (compact over a few cells)
 and B_c a local cubic temporal B-spline. Divergence free by construction (so a
 pressure closure can stand in; the pressure term drops). Compact in space and
-time (the temporal factor is what my earlier global-spatial attempt lacked: a
-time-constant test function makes the time-weak load cancel over the moving
-flowing region). Only interior (a, b, c) are kept (support inside the
-space-time flowing region), the analogue of EUCLID's free DoFs.
+time. The temporal factor prevents the time-weak load from canceling over a moving
+flowing region, as it does for a time-constant test function. Only interior
+(a, b, c) are kept, with support inside the space-time flowing region; these are
+the analogue of EUCLID's free DoFs.
 
 Space-time separability factorizes the assembly: spatial integrands are formed
 per frame, then combined with the temporal basis B_c(t_f) and its derivative

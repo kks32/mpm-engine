@@ -1,26 +1,24 @@
-"""Recursive-least-squares coefficient evaluation over a single experiment's frame sequence.
+"""Recursive-least-squares coefficient evaluation for one experiment.
 
-The deployed Mode F basis spans the granular family; a single collapse under-excites the
-inertial number, so a one-shot batch fit of the K coefficients is poorly determined in the
-directions the flow never probes. This module answers a different question than "what is the
-best batch estimate": it streams the per-frame grid-consistent weak-form rows of ONE collapse
-through recursive least squares and watches theta(t) converge frame by frame. That trajectory
-is the identifiability diagnostic ("which coefficients have been pinned down yet, and when"),
-and the family-coefficient prior enters as the RLS INITIALIZATION: theta_0 = theta_bar,
-P_0 = Sigma_theta / rho. In the directions the collapse never excites the data information is
-tiny so the prior precision dominates and pins those coefficients at the family mean; in the
-excited directions the streamed rows take over. Without the prior the same stream lets the
-under-excited subspace run free and the recovered mu(I) blows up; with it, the streamed
-single-collapse estimate stays on the family manifold.
+The deployed Mode F basis spans the granular family, but one collapse covers only part
+of the inertial-number range. A batch fit is therefore poorly determined in unexcited
+directions. This module streams each frame's grid-consistent weak-form rows through
+recursive least squares and records theta(t) as an identifiability diagnostic.
+
+The family prior initializes RLS with theta_0 = theta_bar and
+P_0 = Sigma_theta / rho. Prior precision controls unexcited directions, while data
+updates the directions covered by the flow. Without the prior, coefficients in the
+under-excited subspace can become unbounded; with it, the estimate stays on the family
+manifold.
 
 This is the EUCLID weak form, unchanged: each frame f contributes the grid-node momentum
 residual rows A_f theta = b_f (grid-consistent Bubnov-Galerkin, true MPM pressure), and RLS
 accumulates them in time order. With forgetting_factor = 1 the final RLS estimate equals the
-batch ridge-to-prior solution (verified), so RLS adds the convergence trajectory and an online
-path, not a different objective. The actual update is the function-encoder repo's numerically
-stable QR (square-root) RLS, validated against the ridge batch to 1e-7.
+batch ridge-to-prior solution. RLS therefore adds an online convergence trajectory rather
+than a different objective. The update uses square-root QR RLS and matches the ridge
+batch to 1e-7.
 
-torch is used ONLY here under function_encoder_training/, per the module boundary. Run:
+Torch is used only under function_encoder_training/, per the module boundary. Run:
   .venv/bin/python -m ident.features.function_encoder_training.fe_rls
 """
 from __future__ import annotations

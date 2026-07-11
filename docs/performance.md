@@ -1,11 +1,10 @@
 # Performance notes
 
-How the explicit solver was profiled and optimized, what each change bought, and the
-equivalence guarantee behind each one. Provenance and BibTeX for borrowed designs are
-in AUTHORS.md. Benchmarks quoted below come from two machines: an Apple M3 Max (warp
-CPU, single threaded) and a TACC Vista GH200 node (driver 590.48.01, July 2026). The
-GPU workload is the 192^3 honey pour of examples/pour_franka.py: 340k particles, 432
-substeps per frame.
+This file records the explicit-solver profiles, optimization measurements, and
+regression tests. Provenance and BibTeX for borrowed designs are in AUTHORS.md. The
+benchmarks use an Apple M3 Max with single-threaded Warp CPU and a TACC Vista GH200
+node with driver 590.48.01 in July 2026. The GPU workload is the 192^3 honey pour from
+`examples/pour_franka.py`, with 340k particles and 432 substeps per frame.
 
 ## Measured results
 
@@ -21,17 +20,18 @@ CPU results depend on the regime. Collider-heavy fluid scenes gain 3.0 to 3.2x f
 the grid-side work; a particle-bound dough press gains almost nothing on CPU because
 warp CPU kernels are single threaded and the particle arithmetic is the whole budget.
 
-Every optimization below ships with an equivalence test. The default pipeline
-produces bitwise-identical particle trajectories, deformation gradients, and stress
-against the pre-optimization solver, and identical identification results downstream
-(tests/test_fused_pipeline.py, tests/test_restricted_launch.py, tests/test_pour.py).
+The default pipeline produces bitwise-identical particle trajectories, deformation
+gradients, and stress relative to the pre-optimization solver. Downstream
+identification results are also unchanged. The regression coverage is in
+`tests/test_fused_pipeline.py`, `tests/test_restricted_launch.py`, and
+`tests/test_pour.py`.
 
 ## Where the time goes
 
-Facts that shaped the work, measured before optimizing:
+The initial profiles showed:
 
-1. Warp CPU kernels are single threaded regardless of core count (98 s real equals
-   98 s user on 16 cores). The Mac is a correctness machine; speed lives on the GPU.
+1. Warp CPU kernels are single threaded regardless of core count: a 16-core run took
+   98 seconds of both real and user time. Additional CPU cores did not reduce runtime.
 2. The explicit step is bound by the acoustic CFL, dt proportional to dx/sqrt(K/rho).
    The bulk modulus is already softened far below real water to keep dt near 1e-4 s.
    Removing this constraint requires an implicit solver, and no kernel tuning changes it.
@@ -39,9 +39,9 @@ Facts that shaped the work, measured before optimizing:
    normalize plus gravity, then one full-grid launch per collider), while occupied
    nodes are typically 2 to 5 percent of the grid.
 4. At 192^3 the first GPU profile put the collider kernels at 70 percent of the
-   substep, ahead of P2G. Profiles beat intuition; run `--profile` before tuning.
+   substep, ahead of P2G. Use `--profile` before tuning a different scene.
 
-## What landed
+## Implemented changes
 
 ### AABB-restricted grid launches
 
@@ -52,15 +52,15 @@ plane a thin slab); zero and normalize use the particle bounding box, padded by
 particle speed, and zeroing runs over the union with the previous box so departing
 nodes are cleared exactly once. Solver.step raises if particles come within two
 cells of the grid edge, which also closes the out-of-bounds P2G write a review had
-flagged. Bench on a 72^3 plane-plus-two-SDF scene: 15.4 to 4.5 ms per substep.
-Restricted and full launches produce bitwise-identical positions.
+flagged. A 72^3 plane-plus-two-SDF scene improved from 15.4 to 4.5 ms per substep.
+`tests/test_restricted_launch.py` covers the restricted and full launch paths.
 
 ### Mass-gated colliders and shelled walls
 
-Every collider kernel returns immediately on nodes with zero mass. This is exact,
-because a massless node lies outside every particle stencil: G2P never reads its
-velocity and it contributes nothing to any wrench. On the GH200 this cut collider
-cost at 192^3 from 1.25 to 0.24 ms per substep and, combined with registering the
+Every collider kernel returns immediately on nodes with zero mass. Skipping such a
+node does not change the result: it lies outside every particle stencil, G2P never
+reads its velocity, and it contributes nothing to a wrench. On the GH200 this reduced
+collider cost at 192^3 from 1.25 to 0.24 ms per substep and, combined with registering the
 domain walls as six thin face shells instead of one full-grid launch, brought the
 pour from 782 to 344 ms per frame. Colliders whose `modify_bc` is None cannot move
 between substeps, so their launch boxes are cached until a pose setter invalidates
@@ -76,9 +76,8 @@ passes instead of 3S. The port follows claymore's g2p2g design (Wang et al., ACM
 existing grid double buffer: the fused kernel reads grid_v_out (state n) and
 scatters into grid_v_in and grid_m (state n+1), which are disjoint arrays.
 
-The fused output stays bitwise-identical to the split pipeline because the zeroing is
-split around the fused pass: grid_m and grid_v_in are cleared before it, grid_v_out
-after it.
+The equivalence guarantee above depends on splitting the zeroing around the fused
+pass: grid_m and grid_v_in are cleared before it, and grid_v_out is cleared after it.
 Normalize writes grid_v_out only where mass exceeds 1e-15, so sub-threshold stencil
 nodes must read an explicitly zeroed grid_v_out on the next gather; clearing it
 early would instead erase the state the fused kernel still needs. The fused path
@@ -104,18 +103,19 @@ The split pipeline captures at full grid dims, which is why it loses at 192^3. T
 fused pipeline captures differently: its interior segment (split zero, fused pass,
 second zero, normalize, damping) is captured over the particle box padded by four
 cells and replayed until the live box escapes the pad, so the graph removes the
-per-substep launch overhead without baking a full-grid sweep. The padding is
-bitwise-safe because nodes outside the box are already zero, normalize skips massless
-nodes, and damping scales zeros. Expected to recover the roughly 14 percent host
-overhead the post-fusion profile shows; the graph-vs-live bitwise test
-(test_fused_graph_replay_bitwise_on_cuda) needs a GPU and is the Vista gate, so this
-is unverified on-device as of this writing.
+per-substep launch overhead without baking a full-grid sweep. The padding does not
+change the output because nodes outside the box are already zero, normalize skips
+massless nodes, and damping scales zeros. The post-fusion profile attributes roughly
+14 percent of runtime to host overhead, which this capture targets. The graph-vs-live
+test, `test_fused_graph_replay_bitwise_on_cuda`, needs a GPU. It is the Vista validation
+gate and remains unverified on-device as of this writing.
 
 ### Substep count (CFL)
 
-The substep count per control tick is set by the acoustic CFL, so lowering it is the
-cheapest lever short of an implicit integrator. `pour_franka --cfl` exposes the
-target (default 0.28). MLS-MPM with quadratic B-splines usually holds near 0.4 to
+The substep count per control tick is set by the acoustic CFL. Lowering it reduces
+work without changing kernels, while an implicit integrator removes the constraint.
+`pour_franka --cfl` exposes the target, which defaults to 0.28. MLS-MPM with
+quadratic B-splines usually holds near 0.4 to
 0.45. A 96^3 smoke A/B (120 frames): 0.42 ran 144 substeps per frame against 216 at
 0.28 (1.5x fewer), stayed stable, and left the ledger essentially unchanged (spill
 and air 1.6 percent in both; leak audit 18 vs 6 projected particles of 40k). That run
@@ -133,8 +133,8 @@ pour, whose occupancy is a compact box, it matches the AABB restriction exactly.
 ### Periodic particle block sort
 
 `sort_interval=K` sorts particle storage by 4^3-block key every K ticks and permutes
-all particle arrays in place, keeping array pointers stable. On the GPU pour it did
-not pay: the meshgrid initialization is already block-coherent, and without a
+all particle arrays in place, keeping array pointers stable. It was slower on the GPU
+pour: the meshgrid initialization is already block-coherent, and without a
 shared-memory scatter kernel the sort only adds overhead (320 vs 278 ms per frame at
 K=8). It stays off by default, also because sorting changes particle index identity
 and would break index-paired trajectory dumps. It remains the prerequisite for a
@@ -142,11 +142,11 @@ shared-memory P2G, where bucket order is required rather than merely helpful.
 
 ## Claymore: what was ported and what was left
 
-The reference is claymore (github.com/penn-graphics-research/claymore, MIT), read
-via Justin Bonus's fork (ClaymoreUW), against the paper Wang, Qiu et al., "A
+The reference is [Claymore](https://github.com/penn-graphics-research/claymore) (MIT),
+read via Justin Bonus's ClaymoreUW fork and checked against Wang, Qiu et al., "A
 Massively Parallel and Scalable Multi-GPU Material Point Method", ACM TOG 39(4),
-2020. Design ported and reimplemented in warp; no source code copied. Their
-architecture reduces to five ideas:
+2020. The design was reimplemented in Warp without copying source code. The relevant
+parts of the architecture are:
 
 1. Fused g2p2g with double-buffered grids. Ported; described above.
 2. Block-centric launches with shared-memory arenas: one CUDA block per active 4^3
@@ -169,7 +169,7 @@ profile shows P2G dominant after the implicit-solver work below.
 
 ## Running on GPU clusters
 
-Two failure modes found on GH200 nodes, both with simple rules:
+Two failure modes were observed on GH200 nodes:
 
 1. GL and heavy CUDA in one process fault the driver (dmesg Xid 31 graphics MMU
    fault with mjr_readPixels hanging uninterruptibly, or Xid 109 context-switch
@@ -186,13 +186,12 @@ Two failure modes found on GH200 nodes, both with simple rules:
 shares; `Solver.profile_report()` returns it programmatically. The per-phase timers
 synchronize the stream, so profiling changes wall time and is off by default.
 
-## Which solver for which scene, and what comes next
+## Solver selection and planned work
 
-Kernel-side tuning at 192^3 is close to exhausted: after fusion the single particle
-pass is 55 percent of the substep and every grid phase is below 15 percent. The
-remaining large lever is the substep count, which the acoustic CFL fixes. That is an
-integrator change, planned in two parts and both keeping the explicit engine as the
-reference oracle:
+After fusion at 192^3, the single particle pass takes 55 percent of each substep and
+every grid phase takes less than 15 percent. Further large reductions require fewer
+substeps, which means changing the integrator. Two such paths are planned, with the
+explicit engine retained as the reference:
 
 1. Quasi-static implicit solver, for press, squeeze, and shaping scenes where the
    tool moves at cm/s and explicit integration spends its substeps resolving sound
@@ -201,9 +200,9 @@ reference oracle:
    quasi-static solvers are the reference implementation (check its license before
    borrowing; reimplement and cite). Validation gates: elastic settling and a plate
    press against slow explicit runs, then a dough squeeze whose implicit dump must
-   yield the same identified (tau_y, eta) as the explicit dump. Realistic
-   expectation on CPU is 5 to 30x wall clock; the qualitative gain is that dt
-   decouples from the bulk modulus, so real stiffness becomes runnable.
+   yield the same identified (tau_y, eta) as the explicit dump. The estimated CPU
+   speedup is 5 to 30 times. Decoupling dt from the bulk modulus would also permit
+   materially realistic stiffness.
 2. A density-projection implicit dynamic solver for liquids, as a separate path.
    Quasi-statics cannot pour, since a falling stream has no equilibrium. A
    Chorin-style density projection enforces incompressibility with dt at the
@@ -211,8 +210,7 @@ reference oracle:
    against a grid density, restores rest packing after breakup, which is the fix
    for the apparent-volume inflation the pour ledger measures at +22 percent.
 
-A note on scene and solver fit until then: press and squeeze scenes are the
-quasi-static target, drop and impact scenes are fine explicitly, and water-scale
-pouring visuals are better served by SPH while the projection solver does not exist.
-The dense, viscoplastic, and granular scenes that identification uses are exactly
-where the explicit engine is already fast and validated.
+Until then, press and squeeze scenes are candidates for the quasi-static solver, while
+drop and impact scenes remain explicit. SPH is a better fit for water-scale pouring
+visuals until the projection solver exists. Dense viscoplastic and granular
+identification scenes remain on the explicit engine.

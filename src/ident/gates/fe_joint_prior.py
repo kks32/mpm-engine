@@ -1,10 +1,10 @@
-"""Robust Mode F: joint multi-aspect grid-consistent solve with the family-coefficient prior.
+"""Joint multi-aspect Mode F solve with a family-coefficient prior.
 
 A single collapse leaves the K-coefficient mu(I) under-determined; pooling several aspect
 ratios widens the excited inertial-number band, and the offline family prior (theta_bar,
 Sigma_theta in the frozen basis, from features/function_encoder_training/prior.py) shrinks
 the fit onto the plausible-law manifold. The prior enters the existing constrained QP as
-AUGMENTED ROWS: minimizing ||A theta - b||^2 + (theta-theta_bar)^T M (theta-theta_bar) with
+augmented rows. Minimizing ||A theta - b||^2 + (theta-theta_bar)^T M (theta-theta_bar) with
 M = rho Sigma^-1 equals ||[A; L] theta - [b; L theta_bar]||^2 for L = chol(M), so no solver
 change is needed. Grid-consistent (Bubnov-Galerkin) assembly with the true MPM pressure.
 """

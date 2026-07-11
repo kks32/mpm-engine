@@ -1,11 +1,9 @@
-"""Wrist force-torque sensor reads back the MPM contact force (Newton's third law).
+"""Compare MPM contact force with a MuJoCo wrist force-torque sensor.
 
-The dough's reaction on the plate is the exact MPM grid impulse, the simulation's load
-cell at the contact. That reaction is fed to a dynamic Franka in MuJoCo as an external
-force on the hand; the arm holds pose with its position actuators, and a wrist
-force-torque sensor, the load cell a real robot actually carries, is read back. The
-wrist reading equals the MPM reaction because the loop conserves force: one number,
-measured at the wrist and at the contact. This validates the two-way readout end to end.
+The plate reaction is computed from the accumulated MPM grid impulse and applied to the
+Franka hand as an external force. Position actuators hold the arm pose while the script
+reads the wrist sensor. It then compares the wrist reading with the force applied at the
+contact.
 
 Run:  python examples/wrist_ft_franka.py
 """

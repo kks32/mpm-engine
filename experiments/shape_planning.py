@@ -1,22 +1,18 @@
-"""Model-based shape planning over the warp MPM engine: the RoboCraft/RoboCook paradigm
-(sampled MPC to a Chamfer/EMD target shape), but the forward model is our physical engine whose
-constitutive law is meant to be identified from one contact probe rather than hand-set.
+"""CEM shape planning with the Warp MPM engine and Chamfer or EMD targets.
 
-Both RoboCraft (Fig. 12) and RoboCook (Table 1, CEM+MPM baseline) use a parameterized MPM as a
-forward model; its only liabilities there are (1) the parameters are guessed and (2) planning is
-slow. Our engine is fast (~0.9 s / rollout, measured) and our inference system supplies the
-parameters by convex weak-form identification. This module is piece (2), the planner.
+RoboCraft (Fig. 12) and RoboCook (Table 1, CEM+MPM baseline) use a parameterized MPM
+as the forward model. This implementation uses parameters from the convex weak-form
+identifier and takes about 0.9 seconds per measured rollout.
 
-Material: von-Mises plasticine ("metal" in the fork); it holds a shape after release (validated:
-97% of the imposed compression retained), the dough/plasticine analog of the prior work.
+The material is von-Mises plasticine, named ``metal`` in the fork. It retains 97 percent
+of the imposed compression after release.
 
-Scope (honest): the box-plate coupling is sticky with no tangential-slip model, so actions are
-vertical multi-press only and targets are compression / free-extrusion shapes (flattened patty),
-not directed lateral transport. Planning is sampled (CEM): the engine is not differentiable, and
-the project invariant forbids differentiating the simulator for identification anyway (here we only
-do forward sampled planning; identification stays the convex weak-form solve).
+The box-plate coupling is sticky and has no tangential-slip model. Actions are therefore
+limited to vertical presses, and targets are compression or free-extrusion shapes rather
+than directed lateral transport. The engine is not differentiated: planning uses sampled
+CEM, and identification remains a separate convex weak-form solve.
 
-Run the harness self-consistency validation:  python experiments/shape_planning.py t0
+Run: ``python experiments/shape_planning.py t0``
 """
 from __future__ import annotations
 

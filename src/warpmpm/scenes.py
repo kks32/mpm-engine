@@ -8,8 +8,10 @@ from warpmpm.materials import Material, newtonian
 
 
 def dough(eta: float = 40.0, tau_y: float = 200.0) -> Material:
-    """Convenience: a dough-like material = Bingham (newtonian + yield). Composed, not a
-    new material type. Params from the validated squeeze-flow study."""
+    """Return the Bingham material used in the squeeze-flow study.
+
+    This composes the Newtonian model with yield stress; it does not add a material type.
+    """
     return newtonian(eta=eta, density=1000.0).with_yield(tau_y)
 
 

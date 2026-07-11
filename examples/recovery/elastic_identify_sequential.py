@@ -192,10 +192,11 @@ def figure(dump="truth.npz"):
 
 
 def rollout_vs_frames(dump="truth.npz", checks=(60, 95, 105, 112, 122, 140, 200, 320, 450)):
-    """The metric that matters: re-simulate the law recovered from the first N frames and measure
-    how well it predicts the whole trajectory (rollout error) vs N. The cheap online Fisher
-    confidence (posterior std of E) is overlaid to show it is a surrogate for the rollout error,
-    so you can decide 'sampled enough' without re-simulating."""
+    """Measure full-trajectory rollout error after recovery from the first N frames.
+
+    The plot overlays the posterior standard deviation of E to test whether it can serve
+    as an online proxy for rollout error.
+    """
     from examples.recovery.elastic_drop import run_drop, _pos_err, TRUTH
     d = np.load(OUT / dump)
     shape = str(d["shape"]) if "shape" in d.files else "sphere"

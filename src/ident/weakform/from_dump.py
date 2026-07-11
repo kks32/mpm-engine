@@ -1,4 +1,4 @@
-"""Build in-plane weak-form FrameData from a validated oracle dump.
+"""Build in-plane weak-form FrameData from an oracle dump.
 
 Bridges ident/io/schema.py (raw 3D dump) to ident/weakform/assembly.py
 (in-plane FrameData). Pure ident-internal: no warp/torch/sim imports.
@@ -10,7 +10,7 @@ Conventions:
     plane strain (D_yy = D_xy = D_zy = 0) this equals the 3D norm, so the
     in-plane restriction of the mu(I) law is exact; the realized departure
     from plane strain is reported as a diagnostic.
-  - pressure is the TRUE 3D Cauchy trace (pressure_from_cauchy_3d_trace).
+  - pressure uses the full 3D Cauchy trace (pressure_from_cauchy_3d_trace).
   - material acceleration is the per-particle trajectory finite difference of
     the dumped velocity (particles are material points), the identification
     default. Central differences interior, one-sided at the ends.

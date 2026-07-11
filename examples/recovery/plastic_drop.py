@@ -172,10 +172,11 @@ def recover(dump_path, log=print):
 
 
 def gate():
-    """The plasticine identifiability gate: same drop, two yield stresses. The low-yield blob
-    yields -> (G, lambda, yield) all recovered. The high-yield blob stays elastic under the same
-    loading -> (G, lambda) recovered but yield refused (only a lower bound). This is the
-    plastic-vs-elastic coverage bound: yield is identifiable only once the material yields."""
+    """Run the same drop with low and high yield stresses.
+
+    The low-yield sample deforms plastically, allowing recovery of G, lambda, and yield.
+    The high-yield sample stays elastic, so recovery returns only a lower bound on yield.
+    """
     OUT.mkdir(parents=True, exist_ok=True)
     E, nu, rho, yld = TRUTH["E"], TRUTH["nu"], TRUTH["rho"], 2.0e4   # same material, eps_y~2.6%
     print("\n=== HARD drop (drop_gap=0.30 -> exceeds yield -> YIELDS) ===")

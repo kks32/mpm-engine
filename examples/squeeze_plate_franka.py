@@ -1,9 +1,9 @@
-"""Arm-mounted plate squeeze: cross-validate the 2D squeeze-flow rheology in 3D.
+"""Arm-mounted plate squeeze comparing 2D and 3D rheology recovery.
 
-The validated quasi-2D plate squeeze is reproduced with the flat plate mounted on the
-Franka, pressing a full 3D dough blob. The material and the plate speed match the 2D
-test (newtonian eta=40 Pa.s, tau_y=200 Pa, rho=1000, bulk=9e5, v_plate=0.08 m/s), and
-so does the identification, the mechanical power balance
+The quasi-2D plate squeeze is repeated with a flat plate mounted on the Franka and a
+3D dough sample. The material and plate speed match the 2D test (newtonian eta=40 Pa.s,
+tau_y=200 Pa, rho=1000, bulk=9e5, v_plate=0.08 m/s). Identification uses the same
+mechanical power balance:
 
     INT tau:D dV = P_plate + P_gravity - dKE/dt ,
     INT tau:D dV = tau_y INT|gd| dV + eta INT|gd|^2 dV   (pressure does no work),
@@ -32,7 +32,7 @@ from warpmpm.coupling.backend import WarpMPMBackend
 OUT = Path(__file__).resolve().parents[1] / "out"
 G_MAG = 9.81
 EPS_GAMMA = 0.05   # match the warp-mpm kernel's shear-rate regularization
-# the validated 2D quasi-plane-strain squeeze result, for reference
+# Reference result from the 2D quasi-plane-strain squeeze.
 REF_2D = {"tau_y_hat": 272.0, "eta_hat": 50.3, "tau_y_true": 200.0, "eta_true": 40.0}
 
 
@@ -130,7 +130,7 @@ def run(n_grid=48, v_plate=0.08, eta=40.0, tau_y=200.0, density=1000.0, bulk=9.0
         z = z_new; prev_z = z_new
         # per-frame scalars for the power-balance identification
         x = s.x(); v = s.v(); L = s.L(); cau = s.cauchy(); vol = s.vol()
-        # Primary plate reaction: the Newton-exact grid impulse the collider imposes,
+        # Primary plate reaction: the accumulated grid impulse imposed by the collider,
         # F = sum_substeps sum_nodes m*(v_free - v_imposed) / frame_dt, with no contact
         # band, thickness layer, or gating. This is the force MuJoCo's wrist sensor
         # reads back. +Fz in compression, so P_plate = +v_plate*F_react.

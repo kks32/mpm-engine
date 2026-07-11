@@ -1,7 +1,7 @@
 """3D dough wide-shear-rate cell: FE recovery + held-out rollout, with rendered visuals.
 
-The 3D squeeze excited only ~1 decade of shear rate and FE lost to Bingham there. This lifts
-the 2D wide-shear protocol (examples/shear_cell_fe.py) to a genuine 3D dough block: a free-y
+The 3D squeeze excited only ~1 decade of shear rate and FE lost to Bingham there. This applies
+the 2D wide-shear protocol (examples/shear_cell_fe.py) to a 3D dough block: a free-y
 block on a sticky floor, sheared by a top wall translating in x at a sweep of speeds spanning
 ~2 decades of gamma_dot. Same power balance INT eta_app(gd) gd^2 dV = v_wall*Fx + Pg - dKE,
 linear in theta. The recovered FE eta_app(gd) is re-simulated directly (tabulated-viscosity
@@ -21,7 +21,7 @@ from pathlib import Path
 
 import numpy as np
 
-# reuse the validated 2D helpers from the shear-cell demo in examples/
+# Reuse the 2D helpers from the shear-cell example.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "examples"))
 from shear_cell_fe import EPS, RHO, TRUTH, _gd, _power_rows, eta_app_true, viscous_prior
 from warpmpm import GridConfig, Solver, newtonian, tabulated_viscous
@@ -33,7 +33,7 @@ OUT = Path(__file__).resolve().parents[1] / "out" / "shear_cell_3d"
 G_MAG = 9.81
 N_GRID = 48
 GRID_LIM = 0.4
-GEOM = (0.12, 0.06, 0.045)        # (Lx, Ly, Lz): a genuine 3D block (free in y)
+GEOM = (0.12, 0.06, 0.045)        # (Lx, Ly, Lz): 3D block, free in y
 FE_TABLE = REPO / "mpm_engine" / "fe-weights" / "viscous.npz"
 
 

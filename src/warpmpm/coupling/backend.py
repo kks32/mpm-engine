@@ -1,15 +1,12 @@
-"""WarpMPMBackend: the coupling surface between a robot sim and the MPM material.
+"""Coupling adapter between a robot simulator and the MPM material solver.
 
-The robot sim owns the robot's dynamics; this backend owns the material and exchanges only
-compact kinematics (in) and reaction wrenches (out) per contact tool, not particles.
-This is the contract MuJoCo plugs into now and Isaac Lab plugs into later, unchanged.
+A tool is represented by a kinematic box collider. Each control tick supplies its
+start-of-tick center and velocity; set_box documents how the collider is integrated over
+the substeps. A stationary tool acts as a no-slip boundary.
 
-A "tool" is a kinematic box end-effector. It is driven by the start-of-tick centre plus a
-per-tick velocity: the fork's modify_bc advances point += dt*velocity on every substep, so
-over one control tick the box sweeps centre -> centre + dt_ctrl*velocity and lands exactly
-on the commanded target. The imposed grid velocity is what presses the material; a tool at
-rest (velocity 0) acts as a static no-slip boundary that holds the material. The reaction
-wrench is the compressive-gated stress integral (coupling/wrench.py).
+Two force readouts are available. get_tool_wrench integrates stress over a contact band
+for quasi-static controller feedback. get_tool_reaction returns the accumulated collider
+grid impulse for moving-contact measurements.
 """
 from __future__ import annotations
 
@@ -22,7 +19,7 @@ from warpmpm.coupling.wrench import box_contact_wrench
 
 @dataclass
 class WarpMPMBackend:
-    """Owns one Solver; exposes attach_tool / set_tool_kinematics / step / get_tool_wrench."""
+    """Connect one Solver to kinematic tool commands and reaction-wrench readouts."""
 
     solver: Solver
     _tools: dict[int, dict[str, Any]] = field(default_factory=dict)
@@ -37,10 +34,11 @@ class WarpMPMBackend:
         return tid
 
     def set_tool_kinematics(self, tool_id: int, center, velocity) -> None:
-        """Command a tool with its start-of-tick centre and per-tick velocity (the contract
-        in set_box: modify_bc integrates centre -> centre + dt_ctrl*velocity over the step).
-        step() then advances the cached centre to the post-step position, so get_tool_wrench
-        reads the right centre without an explicit at_center."""
+        """Set a tool's start-of-tick center and per-tick velocity.
+
+        This follows the contract documented by Solver.set_box. step() advances the cached
+        center to its post-step position, which get_tool_wrench uses by default.
+        """
         self.solver.set_box(tool_id, center=center, velocity=velocity)
         self._tools[tool_id]["center"] = tuple(map(float, center))
         self._tools[tool_id]["velocity"] = tuple(map(float, velocity))
@@ -54,16 +52,16 @@ class WarpMPMBackend:
             t["center"] = (c[0] + v[0] * dt_ctrl, c[1] + v[1] * dt_ctrl, c[2] + v[2] * dt_ctrl)
 
     def get_tool_wrench(self, tool_id: int, at_center=None, **kw) -> dict:
-        """Quasi-static contact wrench from the stress integral over the box, for the force
-        controller (admittance/impedance) feedback. This and the grid impulse measure different
-        things and must not be conflated: the grid impulse (reset_tool_force/get_tool_reaction)
-        is the dynamic reaction F = sum m (v_free - v_imposed)/dt, calibrated, and is the signal
-        for moving-contact identification (the squeeze, the shear cell). At a quasi-static halt
-        v_free -> v_imposed so that impulse collapses, while the static contact force the
-        controller must regulate against is still large and is what this stress integral reports.
-        So: grid impulse for moving-contact identification, this wrench for static-contact force
-        control. Uncalibrated (biases the stress estimate), but the right signal for a halt.
-        Evaluate at the post-step centre (at_center)."""
+        """Estimate a quasi-static contact wrench by integrating stress over the box.
+
+        This readout is intended for admittance or impedance feedback. It differs from
+        get_tool_reaction, which measures ``sum m * (v_free - v_imposed) / dt`` and is used
+        for moving-contact identification. At a static halt, that grid-impulse signal tends
+        to zero as the two velocities match, while the contact stress remains nonzero.
+
+        The stress-integral estimate has a known bias. ``at_center`` sets the post-step
+        center at which torque is evaluated; the cached post-step center is the default.
+        """
         t = self._tools[tool_id]
         c = tuple(map(float, at_center)) if at_center is not None else t["center"]
         return box_contact_wrench(
@@ -75,8 +73,9 @@ class WarpMPMBackend:
         self.solver.reset_tool_force(tool_id)
 
     def get_tool_reaction(self, tool_id: int, dt: float):
-        """Reaction force on the tool from the collider grid impulse accumulated since the last
-        reset_tool_force, over elapsed time dt. This is the exact accumulated grid impulse, not a
-        stress integral. Returns force[3] (compression -> +z). Calibrated: no contact band, no
-        T_layer, no gating."""
+        """Return the collider grid impulse since reset_tool_force, divided by ``dt``.
+
+        The result is ``force[3]`` with positive z in compression. It uses no contact band,
+        layer thickness, or stress gate.
+        """
         return self.solver.tool_force(tool_id, dt)

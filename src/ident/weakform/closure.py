@@ -1,9 +1,9 @@
 """Momentum-closure diagnostic (MATH_REFERENCE.md Section 2.3).
 
-Built BEFORE any regression. For the true material the master identity holds
-for any admissible w. Two row families per patch:
+Run this diagnostic before regression. For the true material, the master identity
+holds for any admissible w. Each patch uses two row families:
 
-  near-rigid w = chi e_i (not divergence free): checks the FULL identity
+  near-rigid w = chi e_i (not divergence free): checks the full identity
       INT_Q sigma : grad w = INT_Q rho (g - a) . w
   with the data stress sigma (oracle dump or closure pressure plus model tau).
 

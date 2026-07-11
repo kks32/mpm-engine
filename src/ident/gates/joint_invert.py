@@ -1,9 +1,8 @@
-"""Joint multi-aspect-ratio divergence-free inversion (the real G3 engine).
+"""Joint multi-aspect-ratio divergence-free inversion for G3.
 
 A single collapse, identified by the divergence-free continuum weak form on a
 reconstructed field, is patch-scale biased (mu rises with patch radius and
-crosses the truth at an r/H-dependent scale). The methodology's remedy is
-joint multi-aspect-ratio inversion: stack the weak-form rows from collapses at
+crosses the truth at an r/H-dependent scale). The joint solve stacks rows from collapses at
 different aspect ratios (different column height H, hence different r/H and
 different I coverage) into one linear system, so a single mu(I) must satisfy
 all geometries at once, breaking the per-geometry scale degeneracy. Combined
@@ -11,8 +10,8 @@ with multi-scale patches (full/half/offset per patch) and I-stratified
 placement.
 
 The fields are reconstructed (streamfunction B-spline) so this works on
-perceived/tracked kinematics; here it is validated on particle-reconstructed
-fields with true pressure to isolate the joint-conditioning question from
+perceived or tracked kinematics. This implementation is first checked on
+particle-reconstructed fields with simulator pressure to separate conditioning from
 tracking noise. Pure ident.
 """
 
