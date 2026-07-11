@@ -66,6 +66,11 @@ load step:
   residual scatter and the commit; wp.eig3 for the principal-space log; masks and
   GMRES in numpy/scipy). Passes the same gate 1 as the prototype
   (tests/test_implicit_quasistatic.py).
-- Next: contact-as-Dirichlet from the SDF colliders and the tool wrench from the
-  residual on constrained nodes, gate 2 (implicit vs slow-explicit plate press with
-  matching wrench), then gate 3 (identification equivalence).
+- Displacement-controlled tools landed: prescribe_nodes (inhomogeneous Dirichlet,
+  fixed increment per load step) with the reaction wrench read from the unmasked
+  residual on prescribed DOFs. Analytic press check passes: a plate pressing the
+  column to 1 percent strain reacts with E A delta / h within 10 percent, linear
+  per step (tests/test_implicit_quasistatic.py).
+- Next: gate 2 proper (implicit vs slow-explicit plate press, displacement field and
+  wrench compared), SDF-collider node selection replacing the hand-picked plate
+  plane, then gate 3 (identification equivalence).

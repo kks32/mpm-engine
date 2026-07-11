@@ -20,6 +20,33 @@ def _column(dx=0.03, col=(0.12, 0.12, 0.36), floor_k=3, ppd=2):
     return pos, vol, org
 
 
+def test_displacement_press_matches_uniaxial_stiffness():
+    """A frictionless plate pressing the column top by delta must react with
+    F = E A delta / h (uniaxial stress, free sides), growing linearly per step."""
+    dx = 0.03
+    floor_k = 3
+    pos, vol, org = _column(dx=dx, floor_k=floor_k)
+    E, nu = 1.0e5, 0.3
+    h, A = 0.36, 0.12 * 0.12
+    qs = QuasiStaticSolver(pos, vol, rho=1000.0, E=E, nu=nu,
+                           grid=GridConfig(n_grid=20, grid_lim=20 * dx), device="cpu")
+    qs.fix_floor(floor_k, components="z")
+    top_z = org[2] + h
+    kz = np.arange(qs.n_nodes) % qs.ng[2]
+    plate = qs._active & (kz * dx >= top_z - 0.6 * dx)
+    n_steps, dz = 4, -0.0009                      # 4 x 0.9 mm = 1 percent strain
+    qs.prescribe_nodes(plate, (0.0, 0.0, dz), components="z")
+    info = qs.solve_gravity(g=0.0, n_steps=n_steps)
+
+    F = np.array(info["tool_force"])              # (n_steps, 3)
+    F_exact = E * A * abs(dz) * n_steps / h
+    assert F[-1][2] > 0                           # compressed column pushes back up
+    assert abs(F[-1][2] - F_exact) / F_exact < 0.10, f"F={F[-1][2]:.2f} vs {F_exact:.2f}"
+    # linear growth with the load step (elastic, small strain)
+    ratios = F[:, 2] / (np.arange(1, n_steps + 1) * F[0][2])
+    assert np.allclose(ratios, 1.0, atol=0.05)
+
+
 def test_equilibrium_column_matches_analytic_profile():
     dx = 0.03
     floor_k = 3

@@ -214,7 +214,8 @@ class QuasiStaticSolver:
         self._active = active
         self._mask[:] = 0.0
         self._mask[active] = 1.0
-        self._dirichlet_masks = []
+        self._u_pre = np.zeros((self.n_nodes, 3))
+        self._pre_dofs = np.zeros((self.n_nodes, 3), dtype=bool)
 
     def fix_nodes(self, node_mask: np.ndarray, components: str = "xyz") -> None:
         """Zero the given components of u on the masked nodes."""
@@ -227,9 +228,25 @@ class QuasiStaticSolver:
         kz = np.arange(self.n_nodes) % self.ng[2]
         self.fix_nodes(kz <= k_plane, components)
 
+    def prescribe_nodes(self, node_mask: np.ndarray, displacement,
+                        components: str = "xyz") -> None:
+        """Inhomogeneous Dirichlet: a rigid tool in displacement control. The masked
+        nodes move by `displacement` (length 3, metres) on EVERY load step of the
+        next solve; the affected components leave the free system, and the reaction
+        wrench the material exerts on them comes back in solve info as tool_force.
+        The node set is fixed until re-prescribed, which is the right granularity for
+        small increments; a moving tool re-prescribes between solves."""
+        disp = np.asarray(displacement, dtype=float)
+        for c, ax in (("x", 0), ("y", 1), ("z", 2)):
+            if c in components:
+                self._mask[node_mask, ax] = 0.0
+                self._u_pre[node_mask, ax] = disp[ax]
+                self._pre_dofs[node_mask, ax] = True
+
     # ---- residual and solve -----------------------------------------------------
-    def _residual(self, u_flat: np.ndarray, g_now: float) -> np.ndarray:
-        u = (u_flat.reshape(self.n_nodes, 3) * self._mask)
+    def _residual(self, u_flat: np.ndarray, g_now: float, masked: bool = True
+                  ) -> np.ndarray:
+        u = (u_flat.reshape(self.n_nodes, 3) * self._mask) + self._u_pre
         wp.copy(self.u_wp, wp.from_numpy(u, dtype=wp.vec3d, device=self.device))
         self.R_wp.zero_()
         wp.launch(_qs_residual, dim=self.n_p,
@@ -238,7 +255,8 @@ class QuasiStaticSolver:
                           f64(1.0 / self.grid.dx), int(self.ng[1]), int(self.ng[2]),
                           self.R_wp],
                   device=self.device)
-        return (self.R_wp.numpy() * self._mask).ravel()
+        R = self.R_wp.numpy()
+        return (R * self._mask).ravel() if masked else R.ravel()
 
     def solve_gravity(self, g: float = 9.81, n_steps: int = 5, newton_max: int = 30,
                       tol_per_particle: float = 1e-8, verbose: bool = False) -> dict:
@@ -265,11 +283,19 @@ class QuasiStaticSolver:
                 u = u + p
             info["newton_iters"].append(it)
             info["residual_norms"].append(rn)
+            if self._pre_dofs.any():
+                # equilibrium is not enforced on prescribed DOFs; the leftover
+                # residual there is the constraint force the tool applies to the
+                # material, so the material's reaction on the tool is its negative
+                R_raw = self._residual(u, g_now, masked=False).reshape(-1, 3)
+                info.setdefault("tool_force", []).append(
+                    -np.array([R_raw[self._pre_dofs[:, ax], ax].sum()
+                               for ax in range(3)]))
             if verbose:
                 print(f"load step {step}: g={g_now:.2f} iters={it} |R|={rn:.3e}")
             # commit: particle positions and F advance; masks refresh for the moved
             # particles (Dirichlet planes are re-applied by the caller if needed)
-            u_m = (u.reshape(self.n_nodes, 3) * self._mask)
+            u_m = (u.reshape(self.n_nodes, 3) * self._mask) + self._u_pre
             wp.copy(self.u_wp, wp.from_numpy(u_m, dtype=wp.vec3d, device=self.device))
             wp.launch(_qs_commit, dim=self.n_p,
                       inputs=[self.x_p, self.F, self.u_wp, f64(1.0 / self.grid.dx),
