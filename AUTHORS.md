@@ -90,6 +90,30 @@ in Warp; no Claymore source code was copied.
 }
 ```
 
+## Borrowed thin-boundary design: CPIC (MIT reference implementation)
+
+The CDF thin-boundary colliders (`add_cdf_collider`, the transfer masking and ghost
+fill in `kernels/mpm_utils.py`, and `geometry.build_surface_cdf`) implement the
+Compatible Particle-in-Cell method with colored distance fields from the MLS-MPM
+paper. The reference implementation is
+[taichi_mpm](https://github.com/yuanming-hu/taichi_mpm) (MIT); the design was
+reimplemented in Warp against the paper, no source code copied. Deviations are
+documented in the kernel docstrings: field-backed CDFs instead of rigid-particle
+splatting, reaction impulses accumulated on the G2P side, and no weak-penalty
+spring (a separation push in the ghost velocity covers penetration recovery).
+
+```bibtex
+@article{hu2018mlsmpm,
+  author  = {Hu, Yuanming and Fang, Yu and Ge, Ziheng and Qu, Ziyin and Zhu, Yixin
+             and Pradhana, Andre and Jiang, Chenfanfu},
+  title   = {A Moving Least Squares Material Point Method with Displacement
+             Discontinuity and Two-Way Rigid Body Coupling},
+  journal = {ACM Transactions on Graphics},
+  volume  = {37}, number = {4}, year = {2018},
+  doi     = {10.1145/3197517.3201293}
+}
+```
+
 ## Other reference codebases and inspirations
 
 No code copied from any of these.
