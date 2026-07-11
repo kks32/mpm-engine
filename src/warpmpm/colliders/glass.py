@@ -159,15 +159,23 @@ class GlassProfile:
         return float(np.trapezoid(np.pi * self.inner_radius_at_z(zs) ** 2, zs))
 
 
-def glass_mid_surface_profile(profile: GlassProfile | None = None) -> np.ndarray:
-    """Open (r, z) polyline of the glass mid-surface: the floor disk at half the base
-    thickness and the wall at the mid radius. Revolve with revolve_profile_open and
-    feed build_surface_cdf for the CPIC thin-wall glass. The floor fillet is a cavity
-    detail thinner than the CDF band and is not represented."""
+def glass_cavity_profile(profile: GlassProfile | None = None) -> np.ndarray:
+    """Open (r, z) polyline of the glass CAVITY surface: the inner floor disk and the
+    inner wall up to the rim. Revolve with revolve_profile_open and feed
+    build_surface_cdf; this is the CPIC contact sheet for the glass.
+
+    The sheet traces the cavity, not the solid's mid-surface. For a shell much
+    thinner than a grid cell the two coincide, but the default glass has a 20 mm
+    wall and a 50 mm base, so a mid-surface sheet would sit 10 mm (wall) and 25 mm
+    (floor) inside the solid, and fluid would sink that far into the glass before
+    touching anything. Tracing the cavity keeps CDF and SDF contact geometry
+    identical. Two cavity details are not represented: the floor fillet (thinner
+    than the CDF band) and contact on the OUTSIDE of the glass (the sheet's band
+    ends a couple of cells past the cavity surface, so runoff down the outer wall
+    crosses solid regions unopposed)."""
     p = GlassProfile() if profile is None else profile
-    r_mid = 0.5 * (p.inner_radius + p.outer_radius)
-    z_floor = p.inner_floor_z - 0.5 * p.base_thickness
-    return np.array([(0.0, z_floor), (r_mid, z_floor), (r_mid, p.rim_z)])
+    return np.array([(0.0, p.inner_floor_z), (p.inner_radius, p.inner_floor_z),
+                     (p.inner_radius, p.rim_z)])
 
 
 def _capped_cylinder_sdf(r_xy, z, radius: float, z0: float, z1: float):

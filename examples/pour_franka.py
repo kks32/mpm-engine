@@ -242,8 +242,29 @@ def render_recording(n_grid: int, workers: int = 0, render_max: int = RENDER_MAX
     return mp4
 
 
+def _wxyz_to_xyzw(q):
+    return (float(q[1]), float(q[2]), float(q[3]), float(q[0]))
+
+
+def _glass_cdf(dx: float):
+    """The glass as a CPIC sheet: the cavity floor-and-wall surface from the same
+    profile, with the built band sized so the runtime band can reach 2 dx. The sheet
+    traces the cavity (not the solid's mid-surface) so CDF and SDF contact geometry
+    are identical; see glass_cavity_profile."""
+    from warpmpm.colliders.glass import glass_cavity_profile
+    from warpmpm.geometry import build_surface_cdf_cached, revolve_profile_open
+
+    verts, faces = revolve_profile_open(glass_cavity_profile(PROFILE), n_theta=96)
+    span = float((verts.max(0) - verts.min(0)).max())
+    res = 96
+    cell = span / (res - 1 - 8)
+    band_cells = max(3.0, float(np.ceil(2.2 * dx / cell)))
+    return build_surface_cdf_cached(verts, faces, res=res, band_cells=band_cells,
+                                    cache_dir=OUT)
+
+
 def build_scene(device: str, n_grid: int, arm: PandaPour, sparse: bool = False,
-                fused: bool = True, sort_interval: int = 0):
+                fused: bool = True, sort_interval: int = 0, glass: str = "cup"):
     grid = GridConfig(n_grid=n_grid, grid_lim=GRID_LIM)
     h = grid.dx / 2
     cup_pos0, cup_quat0 = arm.cup_pose_at(0.0)
@@ -255,10 +276,18 @@ def build_scene(device: str, n_grid: int, arm: PandaPour, sparse: bool = False,
     s.set_material(newtonian(**HONEY))
     s.add_plane((0, 0, WORLD_TO_MPM[2]), (0, 0, 1), "separate", friction=0.3)
     s.add_domain_walls()
-    src = s.add_cup(PROFILE, cup_pos0 + WORLD_TO_MPM, tuple(cup_quat0),
-                    friction=GLASS_FRICTION)
-    rcv = s.add_cup(PROFILE, RECEIVER_POS + WORLD_TO_MPM, tuple(Q_ID),
-                    friction=GLASS_FRICTION)
+    if glass == "cdf":
+        cdf = _glass_cdf(grid.dx)
+        src = s.add_cdf_collider(cdf, cup_pos0 + WORLD_TO_MPM,
+                                 quat=_wxyz_to_xyzw(cup_quat0),
+                                 friction=GLASS_FRICTION)
+        rcv = s.add_cdf_collider(cdf, RECEIVER_POS + WORLD_TO_MPM,
+                                 quat=_wxyz_to_xyzw(Q_ID), friction=GLASS_FRICTION)
+    else:
+        src = s.add_cup(PROFILE, cup_pos0 + WORLD_TO_MPM, tuple(cup_quat0),
+                        friction=GLASS_FRICTION)
+        rcv = s.add_cup(PROFILE, RECEIVER_POS + WORLD_TO_MPM, tuple(Q_ID),
+                        friction=GLASS_FRICTION)
     return s, grid, src, rcv, vol
 
 
@@ -314,12 +343,13 @@ def run(device: str = "auto", n_grid: int = 192, video: bool = True, cfl: float 
         frames: int | None = None, render_workers: int = 0,
         render_max: int = RENDER_MAX, sparse: bool = False,
         fused: bool = True, sort_interval: int = 0,
-        profile: bool = False) -> dict:
+        profile: bool = False, glass: str = "cup") -> dict:
     OUT.mkdir(parents=True, exist_ok=True)
     arm = make_arm(write_glass_obj(PROFILE, OUT / "glass_render.obj"))
 
     s, grid, src, rcv, vol = build_scene(device, n_grid, arm, sparse=sparse,
-                                         fused=fused, sort_interval=sort_interval)
+                                         fused=fused, sort_interval=sort_interval,
+                                         glass=glass)
     s.profile = profile
     h = grid.dx / 2
     n0 = s.n_particles
@@ -335,7 +365,8 @@ def run(device: str = "auto", n_grid: int = 192, video: bool = True, cfl: float 
           f"{n_frames} frames")
 
     # ---- settle (cached) --------------------------------------------------------------
-    cache = OUT / f"settled_n{n_grid}_f{int(100*FILL_FRACTION)}.npz"
+    suffix = "" if glass == "cup" else f"_{glass}"
+    cache = OUT / f"settled_n{n_grid}_f{int(100*FILL_FRACTION)}{suffix}.npz"
     cup_pos0, cup_quat0 = arm.cup_pose_at(0.0)
     if cache.exists() and not rebake:
         d = np.load(cache)
@@ -386,12 +417,20 @@ def run(device: str = "auto", n_grid: int = 192, video: bool = True, cfl: float 
         p1, q1 = arm.cup_pose_at(t + dt_tick)
         vel = (p1 - p0) / dt_tick
         omega = angular_velocity_between(q0, q1, dt_tick)
-        s.set_cup(src, center=p0 + WORLD_TO_MPM, quat=q0, velocity=vel, omega=omega)
-        s.reset_cup_wrench(src)
-        s.reset_cup_wrench(rcv)
-        s.step(dt, substeps)
-        w_src = s.cup_wrench(src, dt_tick)
-        w_rcv = s.cup_wrench(rcv, dt_tick)
+        if glass == "cdf":
+            s.set_cdf_pose(src, center=p0 + WORLD_TO_MPM, quat=_wxyz_to_xyzw(q0),
+                           velocity=vel, omega=omega)
+            s.reset_cdf_wrench()
+            s.step(dt, substeps)
+            w_src = s.cdf_wrench(src, dt_tick)  # approximate for CDF; see solver docs
+            w_rcv = s.cdf_wrench(rcv, dt_tick)
+        else:
+            s.set_cup(src, center=p0 + WORLD_TO_MPM, quat=q0, velocity=vel, omega=omega)
+            s.reset_cup_wrench(src)
+            s.reset_cup_wrench(rcv)
+            s.step(dt, substeps)
+            w_src = s.cup_wrench(src, dt_tick)
+            w_rcv = s.cup_wrench(rcv, dt_tick)
         t_now = t + dt_tick
         p_now, q_now = p1, q1
         t_b = time.time()
@@ -568,6 +607,10 @@ if __name__ == "__main__":
     ap.add_argument("--profile", action="store_true",
                     help="per-phase substep timing table (forces live launches + a device "
                          "sync per phase, so the run is slower; the shares are the signal)")
+    ap.add_argument("--glass", choices=("cup", "cdf"), default="cup",
+                    help="glass collider: 'cup' = the analytic revolved SDF (default), "
+                         "'cdf' = the CPIC cavity sheet (watertight at any wall "
+                         "thickness; compare leak audits)")
     args = ap.parse_args()
     if args.render_only:
         render_recording(96 if args.fast else args.n_grid,
@@ -578,4 +621,5 @@ if __name__ == "__main__":
             rebake=args.rebake, frames=args.frames,
             render_workers=args.render_workers, render_max=args.render_max,
             sparse=args.sparse, fused=not args.no_fused, cfl=args.cfl,
-            sort_interval=args.sort_interval, profile=args.profile)
+            sort_interval=args.sort_interval, profile=args.profile,
+            glass=args.glass)

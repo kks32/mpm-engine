@@ -469,11 +469,13 @@ class Solver:
         dx = self.grid.dx
         lim = self.grid.grid_lim
         # Known limitation: this check runs once per tick, so a particle that gains
-        # enough speed MID-tick can cross the margin between checks and corrupt P2G
-        # memory (observed as a tick-2 segfault in an uncontained pour scene, on
-        # kernels predating any recent feature). A velocity-predictive check here
+        # enough speed MID-tick can in principle cross the margin between checks and
+        # corrupt P2G memory. The one observed instance was a pour probe stepped at
+        # 9x the acoustic CFL, where the EOS blowup manufactured such particles; no
+        # stably-stepped scene has tripped it. A velocity-predictive check here
         # over-triggers because colliders legitimately stop fast particles within
-        # the tick; the real fix is kernel-side index clamping.
+        # the tick; if a real scene ever hits this, the fix is kernel-side index
+        # clamping.
         if x.min() < 1.5 * dx or x.max() > lim - 2.5 * dx:
             raise RuntimeError(
                 f"particles within 2 cells of the grid edge (x in "

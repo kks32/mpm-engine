@@ -6,7 +6,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from warpmpm.colliders.glass import GlassProfile, glass_mid_surface_profile
+from warpmpm.colliders.glass import GlassProfile, glass_cavity_profile
 from warpmpm.geometry import (
     CDFData,
     build_surface_cdf,
@@ -86,11 +86,14 @@ def test_closed_mesh_has_no_boundary():
     assert len(_boundary_loop_samples(v, f, 0.01)) == 0
 
 
-def test_glass_mid_surface_profile_geometry():
+def test_glass_cavity_profile_geometry():
     p = GlassProfile()
-    poly = glass_mid_surface_profile(p)
+    poly = glass_cavity_profile(p)
     assert poly[0][0] == 0.0                                 # starts on the axis
-    assert np.isclose(poly[1][0], 0.5 * (p.inner_radius + p.outer_radius))
+    # the sheet is the CAVITY surface (contact-correct for thick walls), not the
+    # solid's mid-surface
+    assert np.isclose(poly[1][0], p.inner_radius)
+    assert np.isclose(poly[0][1], p.inner_floor_z)
     assert np.isclose(poly[-1][1], p.rim_z)                  # ends at the rim
     v, f = revolve_profile_open(poly, n_theta=32)
     assert len(_boundary_loop_samples(v, f, 0.01)) > 0       # open at the rim
