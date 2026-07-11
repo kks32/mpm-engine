@@ -96,6 +96,13 @@ class MPMStateStruct:
 
     particle_L: wp.array(dtype=wp.mat33)  # velocity gradient from g2p, L_ij = dv_i/dx_j (TrackEUCLID dump)
 
+    # CPIC color persistence (paper 5.3.3): a particle keeps its side of each thin
+    # boundary while any node in its kernel still has that lane's affinity, so a
+    # slight penetration by advection error cannot flip its allegiance (the fresh
+    # vote would, and the particle would fall through). Written by g2p, read by the
+    # next p2g; in the fused kernel both halves run in one thread in that order.
+    particle_cdf_tag: wp.array(dtype=int)
+
     particle_selection: wp.array(dtype=int) # only particle_selection[p] = 0 will be simulated
     particle_material: wp.array(dtype=int)  # material type per particle (0=jelly,1=metal,2=sand,3=foam,4=snow,5=plasticine,6=fluid,7=stationary,8=rigid)
     particle_rigid_id: wp.array(dtype=int)  # rigid body id for mat==8 particles; -1 for non-rigid

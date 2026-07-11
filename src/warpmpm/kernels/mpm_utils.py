@@ -689,6 +689,167 @@ def update_cov(state: MPMStateStruct, p: int, grad_v: wp.mat33, dt: float):
     state.particle_cov[p * 6 + 5] = cov_np1[2, 2]
 
 
+# ---------------------------------------------------------------------------
+# CPIC thin-boundary support (Hu et al., SIGGRAPH 2018, Section 5; MIT reference
+# implementation yuanming-hu/taichi_mpm; design notes in the paper at
+# literature/mls_mpm_cpic_2018.pdf). Particle tags are reconstructed from node
+# tags inside the transfer funcs rather than stored: the fused kernel advects the
+# position between its g2p and p2g halves, so a stored tag would be one substep
+# stale (and reconstruction keeps permute_particles untouched). One deviation
+# from the paper: the rigid impulse accumulates during G2P from the ghost
+# substitution, m w (v_p - ghost), the same quantity Section 5.4 accumulates on
+# the P2G side; G2P is where the ghost is already computed.
+# ---------------------------------------------------------------------------
+
+@wp.func
+def cdf_pair_incompatible(pc: int, nt: int) -> bool:
+    """Particle-node pair incompatible when any lane has valid bits on BOTH and
+    differing side bits (paper 5.3.4). 0x55 selects the four lanes' valid bits."""
+    both_valid = pc & nt & 0x55
+    sides_differ = (pc ^ nt) >> 1
+    return (both_valid & sides_differ) != 0
+
+
+@wp.func
+def cdf_particle_tag(state: MPMStateStruct, base_x: int, base_y: int, base_z: int,
+                     w: wp.mat33, use_prev: int):
+    """Reconstruct a particle's tag from node tags: affinity = any valid node in the
+    kernel; side = sign of the distance-weighted vote sum w * d * side (paper Eq. 21;
+    the d factor de-weights near-surface nodes whose side is ambiguous)."""
+    votes = wp.vec4(0.0, 0.0, 0.0, 0.0)
+    seen = int(0)
+    for i in range(0, 3):
+        for j in range(0, 3):
+            for k in range(0, 3):
+                ix = base_x + i
+                iy = base_y + j
+                iz = base_z + k
+                t = int(0)
+                d = float(0.0)
+                if use_prev == 1:
+                    t = state.grid_cdf_tag_prev[ix, iy, iz]
+                    d = state.grid_cdf_d_prev[ix, iy, iz]
+                else:
+                    t = state.grid_cdf_tag[ix, iy, iz]
+                    d = state.grid_cdf_d[ix, iy, iz]
+                if t == 0:
+                    continue
+                weight = w[0, i] * w[1, j] * w[2, k]
+                for lane in range(0, 4):
+                    if ((t >> (2 * lane)) & 1) != 0:
+                        seen = seen | (1 << (2 * lane))
+                        s = -1.0
+                        if ((t >> (2 * lane + 1)) & 1) != 0:
+                            s = 1.0
+                        votes[lane] = votes[lane] + weight * d * s
+    pc = int(0)
+    for lane in range(0, 4):
+        if ((seen >> (2 * lane)) & 1) != 0:
+            pc = pc | (1 << (2 * lane))
+            if votes[lane] >= 0.0:
+                pc = pc | (1 << (2 * lane + 1))
+    return pc
+
+
+@wp.func
+def cdf_persist_tag(old: int, fresh: int) -> int:
+    """Color persistence (paper 5.3.3): while a lane's affinity remains anywhere in
+    the kernel, the particle keeps its previous SIDE for that lane; the fresh vote
+    decides only for newly acquired affinities. Without this, a particle nudged
+    across the surface by advection error flips allegiance and falls through."""
+    pc = int(0)
+    for lane in range(0, 4):
+        if ((fresh >> (2 * lane)) & 1) != 0:
+            pc = pc | (1 << (2 * lane))
+            if ((old >> (2 * lane)) & 1) != 0:
+                pc = pc | (old & (1 << (2 * lane + 1)))
+            else:
+                pc = pc | (fresh & (1 << (2 * lane + 1)))
+    return pc
+
+
+@wp.func
+def cdf_particle_ghost(state: MPMStateStruct, model: MPMModelStruct, dt: float,
+                       p: int, pc: int, base_x: int, base_y: int, base_z: int,
+                       w: wp.mat33, dw: wp.mat33):
+    """The collided particle velocity used at incompatible nodes (paper 5.5): the
+    particle's velocity projected against its primary surface (sticky/slip/
+    separable + Coulomb, the SDF collide kernel's projection), plus a separation
+    push when the reconstructed signed distance is at or below a small epsilon
+    (the paper's Delta-t c n term). Geometry comes from an MLS-style reconstruction
+    over the prev tag grids: d_hat = sum w s d, n_hat = normalize(sum dweight s d),
+    primary lane = owner lane of the heaviest valid node."""
+    d_hat = float(0.0)
+    n_acc = wp.vec3(0.0, 0.0, 0.0)
+    best_w = float(0.0)
+    lane_p = int(0)
+    for i in range(0, 3):
+        for j in range(0, 3):
+            for k in range(0, 3):
+                ix = base_x + i
+                iy = base_y + j
+                iz = base_z + k
+                t = state.grid_cdf_tag_prev[ix, iy, iz]
+                if t == 0:
+                    continue
+                own = (t >> CDF_OWNER_SHIFT_C) & 3
+                if ((t >> (2 * own)) & 1) == 0:
+                    continue
+                weight = w[0, i] * w[1, j] * w[2, k]
+                s = -1.0
+                if ((t >> (2 * own + 1)) & 1) != 0:
+                    s = 1.0
+                d = state.grid_cdf_d_prev[ix, iy, iz]
+                d_hat = d_hat + weight * s * d
+                dweight = compute_dweight(model, w, dw, i, j, k)
+                n_acc = n_acc + dweight * s * d
+                if weight > best_w:
+                    best_w = weight
+                    lane_p = own
+    # project the particle's FREE velocity for this substep (old velocity plus the
+    # body-force increment): grid nodes receive gravity before their BCs, and
+    # without the same increment here a resting contact has no normal approach and
+    # the Coulomb term has no budget (friction would silently do nothing)
+    v_free_p = state.particle_v[p] + dt * model.gravitational_accelaration
+    ghost = v_free_p
+    if wp.length(n_acc) > 1.0e-12:
+        n_hat = wp.normalize(n_acc)                 # points toward the + side
+        side = 1.0
+        if ((pc >> (2 * lane_p + 1)) & 1) == 0:
+            side = -1.0
+        n_par = n_hat * side                        # away from the surface, particle side
+        rel = state.particle_x[p] - state.cdf_lane_center_prev[lane_p]
+        v_surf = (state.cdf_lane_velocity_prev[lane_p]
+                  + wp.cross(state.cdf_lane_omega_prev[lane_p], rel))
+        v_rel = v_free_p - v_surf
+        vn = wp.dot(v_rel, n_par)
+        v_tan = v_rel - vn * n_par
+        # separation push: signed distance on the particle's side at or below
+        # epsilon means penetration by advection error; push out along n_par,
+        # capped at half a cell per substep. The push is part of the NORMAL
+        # impulse, so it feeds the Coulomb budget below; capping friction at
+        # mu * (approach removed) alone would reference only this substep's
+        # ~g dt approach and friction could never anchor a resting body.
+        c = float(0.0)
+        d_side = d_hat * side
+        eps = 0.05 * model.dx
+        if d_side < eps:
+            c = wp.min((eps - d_side) / dt, 0.5 * model.dx / dt)
+        stype = state.cdf_lane_type[lane_p]
+        if stype == 0:                              # sticky
+            ghost = v_surf + c * n_par
+        elif stype == 1:                            # slip (frictionless, bilateral)
+            ghost = v_surf + v_tan + c * n_par
+        else:                                       # separable + Coulomb friction
+            dvn = wp.max(-vn, 0.0) + c              # normal impulse per unit mass
+            tlen = wp.length(v_tan)
+            if tlen > 1.0e-12 and dvn > 0.0:
+                scale = wp.max(0.0, tlen - state.cdf_lane_friction[lane_p] * dvn) / tlen
+                v_tan = v_tan * scale
+            ghost = v_surf + v_tan + wp.max(vn, 0.0) * n_par + c * n_par
+    return ghost
+
+
 @wp.func
 def p2g_particle(state: MPMStateStruct, model: MPMModelStruct, dt: float, p: int):
     # input given to p2g:   particle_stress
@@ -717,6 +878,12 @@ def p2g_particle(state: MPMStateStruct, model: MPMModelStruct, dt: float, p: int
         fx - wp.vec3(0.5),
     )
 
+    pc = int(0)
+    if model.n_cdf > 0:
+        pc = cdf_persist_tag(
+            state.particle_cdf_tag[p],
+            cdf_particle_tag(state, base_pos_x, base_pos_y, base_pos_z, w, 0))
+
     for i in range(0, 3):
         for j in range(0, 3):
             for k in range(0, 3):
@@ -726,6 +893,8 @@ def p2g_particle(state: MPMStateStruct, model: MPMModelStruct, dt: float, p: int
                 ix = base_pos_x + i
                 iy = base_pos_y + j
                 iz = base_pos_z + k
+                if pc != 0 and cdf_pair_incompatible(pc, state.grid_cdf_tag[ix, iy, iz]):
+                    continue  # CPIC: no transfer across the thin boundary
                 weight = w[0, i] * w[1, j] * w[2, k]  # tricubic interpolation
                 dweight = compute_dweight(model, w, dw, i, j, k)
                 C = state.particle_C[p]
@@ -798,6 +967,20 @@ def g2p_particle(state: MPMStateStruct, model: MPMModelStruct, dt: float, p: int
             -2.0 * (fx - wp.vec3(1.0)),
             fx - wp.vec3(0.5),
         )
+        pc = int(0)
+        ghost = wp.vec3(0.0, 0.0, 0.0)
+        if model.n_cdf > 0:
+            # gather-side tags come from the PREV stamp (the pose the scattered
+            # grid state was built under); the split pipeline copies cur -> prev
+            # after stamping so both reads see the same pose there
+            pc = cdf_persist_tag(
+                state.particle_cdf_tag[p],
+                cdf_particle_tag(state, base_pos_x, base_pos_y, base_pos_z, w, 1))
+            state.particle_cdf_tag[p] = pc
+            if pc != 0:
+                ghost = cdf_particle_ghost(state, model, dt, p, pc,
+                                           base_pos_x, base_pos_y, base_pos_z, w, dw)
+
         new_v = wp.vec3(0.0, 0.0, 0.0)
         new_C = wp.mat33(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
         new_F = wp.mat33(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
@@ -810,6 +993,23 @@ def g2p_particle(state: MPMStateStruct, model: MPMModelStruct, dt: float, p: int
                     dpos = wp.vec3(wp.float(i), wp.float(j), wp.float(k)) - fx
                     weight = w[0, i] * w[1, j] * w[2, k]  # tricubic interpolation
                     grid_v = state.grid_v_out[ix, iy, iz]
+                    if pc != 0 and cdf_pair_incompatible(
+                            pc, state.grid_cdf_tag_prev[ix, iy, iz]):
+                        # CPIC ghost fill: the particle's collided velocity stands
+                        # in for the incompatible node with the node's own weight
+                        # (partition of unity preserved for v, C, and L), and the
+                        # momentum the projection removes is the reaction impulse
+                        t_prev = state.grid_cdf_tag_prev[ix, iy, iz]
+                        own = (t_prev >> CDF_OWNER_SHIFT_C) & 3
+                        imp = weight * state.particle_mass[p] * (
+                            state.particle_v[p]
+                            + dt * model.gravitational_accelaration - ghost)
+                        wp.atomic_add(state.cdf_reaction_force, own, imp)
+                        wp.atomic_add(
+                            state.cdf_reaction_torque, own,
+                            wp.cross(state.particle_x[p]
+                                     - state.cdf_lane_center_prev[own], imp))
+                        grid_v = ghost
                     new_v = new_v + grid_v * weight
                     new_C = new_C + wp.outer(grid_v, dpos) * (
                         weight * model.inv_dx * 4.0

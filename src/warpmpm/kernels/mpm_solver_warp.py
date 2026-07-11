@@ -332,6 +332,9 @@ class MPM_Simulator_WARP:
             shape=n_particles, dtype=int, device=device
         )  # default 0 = jelly
 
+        self.mpm_state.particle_cdf_tag = wp.zeros(
+            shape=n_particles, dtype=int, device=device
+        )  # CPIC persisted side bits; 0 while no thin boundary is in the kernel
         self.mpm_state.particle_rigid_id = wp.zeros(
             shape=n_particles, dtype=int, device=device
         )  # rigid body id; only meaningful when particle_material == 8
@@ -1504,7 +1507,8 @@ class MPM_Simulator_WARP:
         model_float_arrays = [self.mpm_model.mu, self.mpm_model.lam,
                               self.mpm_model.yield_stress]
         float6_arrays = [st.particle_init_cov, st.particle_cov]
-        int_arrays = [st.particle_selection, st.particle_material, st.particle_rigid_id]
+        int_arrays = [st.particle_selection, st.particle_material, st.particle_rigid_id,
+                      st.particle_cdf_tag]
         listed = {id(a) for a in (vec3_arrays + mat33_arrays + float_arrays
                                   + float6_arrays + int_arrays)}
         for name in dir(st):

@@ -413,10 +413,13 @@ class Solver:
         # covariance transport (update_cov_with_F) needs no extra gate here: the fused
         # kernel g2p_stress_p2g calls the same g2p_particle wp.func as the split g2p, and
         # the cov advection lives inside it, so both pipelines advect cov identically.
+        # CDF colliders run split-only until the fused pipeline's prev-buffer
+        # discipline lands (CPIC plan step 5)
         fused_ok = (self.fused and not self.sparse
                     and not self._sim.pre_p2g_operations
                     and not self._sim.particle_velocity_modifiers
-                    and self._sim.n_rigid_bodies == 0)
+                    and self._sim.n_rigid_bodies == 0
+                    and self._sim.mpm_model.n_cdf == 0)
         if fused_ok:
             self._sim.p2g2p_fused_tick(dt, substeps, device=self.device)
             self._step += substeps
