@@ -99,7 +99,6 @@ No code copied from any of these.
 - PhysGaussian (github.com/XPandora/PhysGaussian), Xie et al., BibTeX above. No license
   file: design only. The covariance hooks in `kernels/` serve this coupling. Filling and
   coupling-loop algorithms reimplemented from its code and paper.
-- GeoWarp, Yidong Zhao. MIT. Reference for a planned quasi-static implicit solver.
 - Genesis (github.com/Genesis-Embodied-AI/Genesis), Apache-2.0. Scene geometry, poses,
   and robot trajectory of the pour example.
 - NVIDIA Warp, Apache-2.0. Dependency.
