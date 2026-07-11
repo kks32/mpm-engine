@@ -14,11 +14,8 @@ MATERIAL_NAME_TO_ID = {
     "tabulated_mu_i": 13,
 }
 MAX_MATERIALS = 16
-# CPIC thin-boundary lanes: 2 tag bits per lane plus a 2-bit owner id fit an int32
-# with room to raise later; 4 keeps the per-lane vote accumulators in one wp.vec4
-# inside the (register-heavy) fused transfer kernel.
-MAX_CDF = 4
-CDF_OWNER_SHIFT = 2 * MAX_CDF
+# MAX_CDF and the tag bit layout live in warp_utils (the transfer kernels in
+# mpm_utils need them too) and arrive via the star import below.
 
 
 # ---------------------------------------------------------------------------
@@ -88,6 +85,74 @@ def sdf_trilerp_vec(vals: wp.array(dtype=wp.vec3, ndim=3), res: int, fidx: wp.ve
     c0 = c00 * (1.0 - ty) + c10 * ty
     c1 = c01 * (1.0 - ty) + c11 * ty
     return c0 * (1.0 - tz) + c1 * tz
+
+
+@wp.kernel
+def cdf_zero_tags(state: MPMStateStruct, lo: wp.vec3i):
+    """Clear node tags and owner distances over a box (before restamping)."""
+    gx, gy, gz = wp.tid()
+    gx = gx + lo[0]
+    gy = gy + lo[1]
+    gz = gz + lo[2]
+    state.grid_cdf_tag[gx, gy, gz] = 0
+    state.grid_cdf_d[gx, gy, gz] = 1.0e9
+
+
+@wp.kernel
+def cdf_copy_prev(state: MPMStateStruct, lo: wp.vec3i):
+    """Copy current node tags/distances into the prev buffers over a box. A copy,
+    never a pointer swap: captured CUDA graphs bake array pointers from the struct
+    value, so the buffers must keep their identities."""
+    gx, gy, gz = wp.tid()
+    gx = gx + lo[0]
+    gy = gy + lo[1]
+    gz = gz + lo[2]
+    state.grid_cdf_tag_prev[gx, gy, gz] = state.grid_cdf_tag[gx, gy, gz]
+    state.grid_cdf_d_prev[gx, gy, gz] = state.grid_cdf_d[gx, gy, gz]
+
+
+@wp.kernel
+def cdf_stamp(time: float, state: MPMStateStruct, model: MPMModelStruct,
+              param: CDFCollider, lo: wp.vec3i):
+    """Stamp one CDF collider's side/validity bits (and owner distance) onto the
+    node tag grid under its live pose. Colliders stamp sequentially and each node
+    is owned by one thread, so plain read-modify-write needs no atomics. A node is
+    tagged only if all eight trilerp corners are valid (validity >= 0.999), which
+    is what keeps the open rim from fabricating a phantom surface."""
+    gx, gy, gz = wp.tid()
+    gx = gx + lo[0]
+    gy = gy + lo[1]
+    gz = gz + lo[2]
+    if time < param.start_time or time >= param.end_time:
+        return
+    xw = wp.vec3(float(gx) * model.dx, float(gy) * model.dx, float(gz) * model.dx)
+    rel = xw - param.center
+    body = wp.quat_rotate_inv(param.quat, rel)
+    fidx = wp.vec3(
+        (body[0] - param.origin[0]) / param.cell,
+        (body[1] - param.origin[1]) / param.cell,
+        (body[2] - param.origin[2]) / param.cell,
+    )
+    rf = float(param.res) - 1.0
+    if (fidx[0] < 0.0 or fidx[1] < 0.0 or fidx[2] < 0.0
+            or fidx[0] > rf or fidx[1] > rf or fidx[2] > rf):
+        return
+    ok = sdf_trilerp(param.cdf_valid, param.res, fidx)
+    if ok < 0.999:
+        return
+    d = sdf_trilerp(param.cdf_val, param.res, fidx)
+    ud = wp.abs(d)
+    if ud > param.band:
+        return
+    side = 0
+    if d >= 0.0:
+        side = 1
+    t = state.grid_cdf_tag[gx, gy, gz]
+    t = t | (1 << (2 * param.lane)) | (side << (2 * param.lane + 1))
+    if ud < state.grid_cdf_d[gx, gy, gz]:
+        state.grid_cdf_d[gx, gy, gz] = ud
+        t = (t ^ (t & CDF_OWNER_MASK_C)) | (param.lane << CDF_OWNER_SHIFT_C)
+    state.grid_cdf_tag[gx, gy, gz] = t
 
 
 def _quat_mul(q1, q2):
@@ -1006,6 +1071,10 @@ class MPM_Simulator_WARP:
                     use_graph = False
         self._graph_warmup = 1
 
+        # CPIC node tags under the live collider poses; runs outside any captured
+        # graph (the stamp kernel takes the pose struct by value)
+        self._stamp_cdf(dt, device)
+
         if sparse:
             self._prev_grid_box = None
             b = self._blk
@@ -1207,6 +1276,8 @@ class MPM_Simulator_WARP:
                     )
             if self.modify_bc[k] is not None:
                 self.modify_bc[k](self.time, dt, self.collider_params[k])
+        # CDF collider poses advance with the same per-substep cadence as modify_bc
+        self._integrate_cdf_poses(dt)
 
     def _p2g2p_tail(self, dt, device):
         """Rigid-body update + time advance (shared by both substep pipelines)."""
@@ -2674,6 +2745,254 @@ class MPM_Simulator_WARP:
             p.velocity = wp.vec3(float(velocity[0]), float(velocity[1]), float(velocity[2]))
         if omega is not None:
             p.omega = wp.vec3(float(omega[0]), float(omega[1]), float(omega[2]))
+
+    # ------------------------------------------------------------------
+    # CPIC thin-boundary (CDF) colliders
+    # ------------------------------------------------------------------
+    def add_cdf_collider(self, cdf_values, cdf_valid, origin, cell, built_band,
+                         center, quat=(0.0, 0.0, 0.0, 1.0), velocity=(0.0, 0.0, 0.0),
+                         omega=(0.0, 0.0, 0.0), band=None, surface="separable",
+                         friction=0.4, start_time=0.0, end_time=999.0, device="cpu"):
+        """Register an open oriented mid-surface (geometry.CDFData arrays) as a CPIC
+        thin-boundary collider. Unlike add_sdf_collider there is no grid-BC kernel:
+        a stamp kernel writes side/validity bits into grid_cdf_tag each substep and
+        the transfer kernels enforce the displacement discontinuity (Hu et al.,
+        SIGGRAPH 2018, Section 5). Returns a CDF handle, a separate handle space
+        from the grid-BC colliders."""
+        lane = len(self.cdf_params)
+        if lane >= MAX_CDF:
+            raise ValueError(f"at most {MAX_CDF} CDF colliders per scene")
+        res = int(cdf_values.shape[0])
+        if band is None:
+            band = min(float(built_band), 2.0 * float(self.mpm_model.dx))
+        if band > float(built_band) + 1e-12:
+            raise ValueError(
+                f"runtime band ({band * 1e3:.1f} mm) exceeds the band the field was "
+                f"built with ({float(built_band) * 1e3:.1f} mm); rebuild the CDF "
+                f"with a larger band_cells.")
+        # masking is complete when both members of any straddling particle-node
+        # pair are tagged; quadratic B-spline support puts them within 1.5 dx of
+        # the wall, so a thinner band can leak
+        if band < 1.5 * float(self.mpm_model.dx):
+            warnings.warn(
+                f"CDF band ({band * 1e3:.1f} mm) is below 1.5 dx "
+                f"({1.5 * self.mpm_model.dx * 1e3:.1f} mm): straddling particle-"
+                f"node pairs can go untagged and the wall can leak.",
+                RuntimeWarning, stacklevel=2)
+        surface_id = {"sticky": 0, "slip": 1, "separable": 2}[surface]
+
+        ext = (res - 1) * float(cell)
+        _corners = np.array([[float(origin[0]) + dx_ * ext,
+                              float(origin[1]) + dy_ * ext,
+                              float(origin[2]) + dz_ * ext]
+                             for dx_ in (0, 1) for dy_ in (0, 1) for dz_ in (0, 1)])
+        r_max = float(np.linalg.norm(_corners, axis=1).max())
+        self._cdf_guard[lane] = {"r_max": r_max, "band": float(band), "warned": False}
+
+        param = CDFCollider()
+        param.cdf_val = wp.from_numpy(
+            np.ascontiguousarray(cdf_values, dtype=np.float32), dtype=float,
+            device=device)
+        param.cdf_valid = wp.from_numpy(
+            np.ascontiguousarray(cdf_valid, dtype=np.float32), dtype=float,
+            device=device)
+        param.res = res
+        param.origin = wp.vec3(float(origin[0]), float(origin[1]), float(origin[2]))
+        param.cell = float(cell)
+        param.center = wp.vec3(float(center[0]), float(center[1]), float(center[2]))
+        param.quat = wp.quat(float(quat[0]), float(quat[1]), float(quat[2]),
+                             float(quat[3]))
+        param.velocity = wp.vec3(float(velocity[0]), float(velocity[1]),
+                                 float(velocity[2]))
+        param.omega = wp.vec3(float(omega[0]), float(omega[1]), float(omega[2]))
+        param.band = float(band)
+        param.surface_type = surface_id
+        param.friction = float(friction)
+        param.lane = lane
+        param.start_time = start_time
+        param.end_time = end_time
+        self.cdf_params.append(param)
+        self.cdf_labels.append("cdf_surface")
+
+        def cdf_aabb(param=param, corners=_corners, self=self):
+            qx, qy, qz, qw = param.quat[0], param.quat[1], param.quat[2], param.quat[3]
+            R = np.array([
+                [1 - 2 * (qy * qy + qz * qz), 2 * (qx * qy - qz * qw), 2 * (qx * qz + qy * qw)],
+                [2 * (qx * qy + qz * qw), 1 - 2 * (qx * qx + qz * qz), 2 * (qy * qz - qx * qw)],
+                [2 * (qx * qz - qy * qw), 2 * (qy * qz + qx * qw), 1 - 2 * (qx * qx + qy * qy)],
+            ])
+            c = np.array([param.center[0], param.center[1], param.center[2]])
+            pts = c + corners @ R.T
+            # +2 node halo: stencil reach of particles whose tags this stamp decides
+            return self._grid_box(pts.min(axis=0), pts.max(axis=0), halo=2)
+
+        self.cdf_aabbs.append(cdf_aabb)
+
+        # first CDF collider: allocate the real tag/distance grids in place of the
+        # placeholders (the graph signature carries the tag pointer, so any captured
+        # graph recaptures rather than replaying against the stale placeholder)
+        if self.mpm_model.n_cdf == 0:
+            ng = self.mpm_model.n_grid
+            self.mpm_state.grid_cdf_tag = wp.zeros(shape=(ng, ng, ng), dtype=int,
+                                                   device=device)
+            self.mpm_state.grid_cdf_tag_prev = wp.zeros(shape=(ng, ng, ng), dtype=int,
+                                                        device=device)
+            self.mpm_state.grid_cdf_d = wp.full(shape=(ng, ng, ng), value=1.0e9,
+                                                dtype=float, device=device)
+            self.mpm_state.grid_cdf_d_prev = wp.full(shape=(ng, ng, ng), value=1.0e9,
+                                                     dtype=float, device=device)
+        self.mpm_model.n_cdf = len(self.cdf_params)
+        self._sync_cdf_lane(lane, device=device)
+        return lane
+
+    def _sync_cdf_lane(self, lane, device="cpu"):
+        """Mirror one collider's pose/material into the per-lane state arrays the
+        transfer kernels read (they cannot take collider structs)."""
+        p = self.cdf_params[lane]
+        for arr, val in ((self.mpm_state.cdf_lane_center, p.center),
+                         (self.mpm_state.cdf_lane_velocity, p.velocity),
+                         (self.mpm_state.cdf_lane_omega, p.omega)):
+            a = arr.numpy()
+            a[lane] = [val[0], val[1], val[2]]
+            wp.copy(arr, wp.array(a, dtype=wp.vec3, device=device))
+        f = self.mpm_state.cdf_lane_friction.numpy()
+        f[lane] = p.friction
+        wp.copy(self.mpm_state.cdf_lane_friction,
+                wp.array(f, dtype=float, device=device))
+        t = self.mpm_state.cdf_lane_type.numpy()
+        t[lane] = p.surface_type
+        wp.copy(self.mpm_state.cdf_lane_type, wp.array(t, dtype=int, device=device))
+
+    def set_cdf_pose(self, handle, center=None, quat=None, velocity=None, omega=None,
+                     device="cpu"):
+        """Same start-of-tick contract as set_sdf_pose; the per-substep integrator
+        advances center and quat between ticks. Warns once on a teleport whose
+        surface sweep exceeds the band (see set_sdf_pose)."""
+        p = self.cdf_params[handle]
+        guard = self._cdf_guard.get(handle)
+        if guard is not None and not guard["warned"]:
+            jump = 0.0
+            if center is not None:
+                jump += float(np.linalg.norm(
+                    np.array([float(center[0]) - p.center[0],
+                              float(center[1]) - p.center[1],
+                              float(center[2]) - p.center[2]])))
+            if quat is not None:
+                dot = abs(float(quat[0]) * p.quat[0] + float(quat[1]) * p.quat[1]
+                          + float(quat[2]) * p.quat[2] + float(quat[3]) * p.quat[3])
+                jump += 2.0 * float(np.arccos(min(1.0, dot))) * guard["r_max"]
+            if jump > guard["band"]:
+                guard["warned"] = True
+                warnings.warn(
+                    f"set_cdf_pose jumped the surface by up to {jump * 1e3:.2f} mm "
+                    f"in one tick, more than the band ({guard['band'] * 1e3:.2f} mm):"
+                    f" material in the swept region can end up on the wrong side. "
+                    f"Drive the pose in smaller per-tick steps.",
+                    RuntimeWarning, stacklevel=2)
+        if center is not None:
+            p.center = wp.vec3(float(center[0]), float(center[1]), float(center[2]))
+        if quat is not None:
+            p.quat = wp.quat(float(quat[0]), float(quat[1]), float(quat[2]),
+                             float(quat[3]))
+        if velocity is not None:
+            p.velocity = wp.vec3(float(velocity[0]), float(velocity[1]),
+                                 float(velocity[2]))
+        if omega is not None:
+            p.omega = wp.vec3(float(omega[0]), float(omega[1]), float(omega[2]))
+        self._sync_cdf_lane(handle, device=device)
+
+    def _cdf_stamp_box(self):
+        """Union of the CDF colliders' AABBs with the previous stamp box, so nodes a
+        collider left get cleared exactly once (the zeroing idiom the grid box uses)."""
+        boxes = [f() for f in self.cdf_aabbs]
+        boxes = [b for b in boxes if b is not None]
+        if self._cdf_prev_stamp_box is not None:
+            boxes.append(self._cdf_prev_stamp_box)
+        if not boxes:
+            return None
+        lo = tuple(min(b[0][i] for b in boxes) for i in range(3))
+        hi_dims = tuple(max(b[0][i] + b[1][i] for b in boxes) for i in range(3))
+        dims = tuple(hi_dims[i] - lo[i] for i in range(3))
+        cur = [f() for f in self.cdf_aabbs if f() is not None]
+        self._cdf_prev_stamp_box = None
+        if cur:
+            clo = tuple(min(b[0][i] for b in cur) for i in range(3))
+            chi = tuple(max(b[0][i] + b[1][i] for b in cur) for i in range(3))
+            self._cdf_prev_stamp_box = (clo, tuple(chi[i] - clo[i] for i in range(3)))
+        return (lo, dims)
+
+    def _stamp_cdf(self, dt, device, lag_prev=False):
+        """Per-substep tag maintenance. Split pipeline (lag_prev False): zero, stamp,
+        copy cur -> prev so the g2p of THIS substep reads this pose's colors. Fused
+        pipeline (lag_prev True): copy cur -> prev FIRST so the fused g2p half reads
+        the previous substep's colors while the p2g half reads this substep's. The
+        lane pose arrays follow the same discipline in _integrate_cdf_poses."""
+        if self.mpm_model.n_cdf == 0:
+            return
+        box = self._cdf_stamp_box()
+        if box is None:
+            return
+        lo, dims = box
+        lo_v = wp.vec3i(lo[0], lo[1], lo[2])
+        if lag_prev:
+            wp.launch(cdf_copy_prev, dim=dims,
+                      inputs=[self.mpm_state, lo_v], device=device)
+        wp.launch(cdf_zero_tags, dim=dims,
+                  inputs=[self.mpm_state, lo_v], device=device)
+        for param in self.cdf_params:
+            wp.launch(cdf_stamp, dim=dims,
+                      inputs=[self.time, self.mpm_state, self.mpm_model, param, lo_v],
+                      device=device)
+        if not lag_prev:
+            wp.launch(cdf_copy_prev, dim=dims,
+                      inputs=[self.mpm_state, lo_v], device=device)
+
+    def _integrate_cdf_poses(self, dt, lag_prev=False):
+        """Advance CDF collider poses one substep (the modify_bc analogue) and keep
+        the lane arrays in step. With lag_prev, current lane poses are copied to the
+        prev arrays before the update (the fused pipeline's discipline)."""
+        if not self.cdf_params:
+            return
+        st = self.mpm_state
+        if lag_prev:
+            wp.copy(st.cdf_lane_center_prev, st.cdf_lane_center)
+            wp.copy(st.cdf_lane_velocity_prev, st.cdf_lane_velocity)
+            wp.copy(st.cdf_lane_omega_prev, st.cdf_lane_omega)
+        for lane, param in enumerate(self.cdf_params):
+            if not (self.time >= param.start_time and self.time < param.end_time):
+                continue
+            guard = self._cdf_guard[lane]
+            c = param.center
+            v = param.velocity
+            w = np.array([param.omega[0], param.omega[1], param.omega[2]], dtype=float)
+            speed = float(np.hypot(np.hypot(v[0], v[1]), v[2])) \
+                + float(np.linalg.norm(w)) * guard["r_max"]
+            if speed * dt > guard["band"] and not guard["warned"]:
+                guard["warned"] = True
+                warnings.warn(
+                    f"CDF collider surface sweeps {speed * dt * 1e3:.2f} mm per "
+                    f"substep, more than the band ({guard['band'] * 1e3:.2f} mm): "
+                    f"material can end up on the wrong side. Reduce dt or the pose "
+                    f"rate, or rebuild with a larger band.",
+                    RuntimeWarning, stacklevel=2)
+            param.center = wp.vec3(c[0] + dt * v[0], c[1] + dt * v[1],
+                                   c[2] + dt * v[2])
+            q = np.array([param.quat[0], param.quat[1], param.quat[2], param.quat[3]],
+                         dtype=float)
+            q = _omega_step_quat(q, w, dt)
+            param.quat = wp.quat(float(q[0]), float(q[1]), float(q[2]), float(q[3]))
+            self._sync_cdf_lane(lane, device=self._device_of_state())
+        if not lag_prev:
+            wp.copy(st.cdf_lane_center_prev, st.cdf_lane_center)
+            wp.copy(st.cdf_lane_velocity_prev, st.cdf_lane_velocity)
+            wp.copy(st.cdf_lane_omega_prev, st.cdf_lane_omega)
+
+    def _device_of_state(self):
+        return str(self.mpm_state.particle_x.device)
+
+    def reset_cdf_wrench(self):
+        self.mpm_state.cdf_reaction_force.zero_()
+        self.mpm_state.cdf_reaction_torque.zero_()
 
     # given normal direction, say [0,0,1]
     # gradually release grid velocities from start position to end position

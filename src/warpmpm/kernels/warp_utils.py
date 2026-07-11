@@ -6,6 +6,15 @@ except Exception:
     pass
 import torch
 
+# CPIC thin-boundary lanes: 2 tag bits per lane plus a 2-bit owner id fit an int32
+# with room to raise later; 4 keeps the per-lane vote accumulators in one wp.vec4
+# inside the (register-heavy) fused transfer kernel. Node tag bit layout: bit 2l =
+# lane l valid, bit 2l+1 = lane l side, bits [CDF_OWNER_SHIFT, +2) = owner lane id.
+MAX_CDF = 4
+CDF_OWNER_SHIFT = 2 * MAX_CDF
+CDF_OWNER_SHIFT_C = wp.constant(CDF_OWNER_SHIFT)
+CDF_OWNER_MASK_C = wp.constant(3 << CDF_OWNER_SHIFT)
+
 
 @wp.struct
 class MPMModelStruct:

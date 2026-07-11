@@ -346,6 +346,47 @@ class Solver:
         t = np.asarray(self._sim.collider_params[handle].torque.numpy()[0], dtype=float)
         return {"force": f / dt, "torque": t / dt}
 
+    def add_cdf_collider(self, cdf, center, quat=(0.0, 0.0, 0.0, 1.0),
+                         velocity=(0.0, 0.0, 0.0), omega=(0.0, 0.0, 0.0), band=None,
+                         surface: str = "separable", friction: float = 0.4,
+                         start_time: float = 0.0, end_time: float = 1.0e9) -> int:
+        """Add an OPEN oriented mid-surface (warpmpm.geometry.CDFData) as a CPIC
+        thin-boundary collider: particle-node transfers are severed across the
+        surface, so it is watertight at any wall thickness, where an SDF collider
+        needs ~2 cells. Drive its pose with set_cdf_pose (set_sdf_pose's contract);
+        read the reaction wrench with cdf_wrench. Handles are a separate space from
+        the grid-BC colliders. Default band = min(built band, 2 dx); masking needs
+        at least 1.5 dx (the B-spline support radius)."""
+        return self._sim.add_cdf_collider(
+            cdf.values, cdf.valid, cdf.origin, cdf.cell, cdf.band, center, quat=quat,
+            velocity=velocity, omega=omega, band=band, surface=surface,
+            friction=friction, start_time=start_time, end_time=end_time,
+            device=self.device,
+        )
+
+    def set_cdf_pose(self, handle: int, center=None, quat=None, velocity=None,
+                     omega=None) -> Solver:
+        """Update a CDF collider's pose each control tick (set_sdf_pose's
+        start-of-tick contract)."""
+        self._sim.set_cdf_pose(handle, center=center, quat=quat, velocity=velocity,
+                               omega=omega, device=self.device)
+        return self
+
+    def reset_cdf_wrench(self) -> Solver:
+        """Zero the CDF reaction accumulators (all lanes; call before step())."""
+        self._sim.reset_cdf_wrench()
+        return self
+
+    def cdf_wrench(self, handle: int, dt: float) -> dict:
+        """Reaction wrench the material exerts on a CDF collider, accumulated from
+        the ghost-projection impulses since the last reset (the thin-boundary
+        analogue of sdf_wrench). Returns {'force': (3,), 'torque': (3,)}."""
+        f = np.asarray(self._sim.mpm_state.cdf_reaction_force.numpy()[handle],
+                       dtype=float)
+        t = np.asarray(self._sim.mpm_state.cdf_reaction_torque.numpy()[handle],
+                       dtype=float)
+        return {"force": f / dt, "torque": t / dt}
+
     def reset_tool_force(self, handle: int) -> Solver:
         """Zero a box collider's reaction accumulator before the measured substeps."""
         self._sim.collider_params[handle].force.zero_()
