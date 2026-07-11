@@ -893,8 +893,12 @@ def p2g_particle(state: MPMStateStruct, model: MPMModelStruct, dt: float, p: int
                 ix = base_pos_x + i
                 iy = base_pos_y + j
                 iz = base_pos_z + k
-                if pc != 0 and cdf_pair_incompatible(pc, state.grid_cdf_tag[ix, iy, iz]):
-                    continue  # CPIC: no transfer across the thin boundary
+                # nested on purpose: warp does NOT short-circuit `and`, and when
+                # n_cdf == 0 the tag grids are (1,1,1) placeholders that must not
+                # be indexed (pc != 0 implies the real grids exist)
+                if pc != 0:
+                    if cdf_pair_incompatible(pc, state.grid_cdf_tag[ix, iy, iz]):
+                        continue  # CPIC: no transfer across the thin boundary
                 weight = w[0, i] * w[1, j] * w[2, k]  # tricubic interpolation
                 dweight = compute_dweight(model, w, dw, i, j, k)
                 C = state.particle_C[p]
@@ -993,8 +997,12 @@ def g2p_particle(state: MPMStateStruct, model: MPMModelStruct, dt: float, p: int
                     dpos = wp.vec3(wp.float(i), wp.float(j), wp.float(k)) - fx
                     weight = w[0, i] * w[1, j] * w[2, k]  # tricubic interpolation
                     grid_v = state.grid_v_out[ix, iy, iz]
-                    if pc != 0 and cdf_pair_incompatible(
-                            pc, state.grid_cdf_tag_prev[ix, iy, iz]):
+                    # nested on purpose: no short-circuit in warp; see p2g_particle
+                    incompat = False
+                    if pc != 0:
+                        incompat = cdf_pair_incompatible(
+                            pc, state.grid_cdf_tag_prev[ix, iy, iz])
+                    if incompat:
                         # CPIC ghost fill: the particle's collided velocity stands
                         # in for the incompatible node with the node's own weight
                         # (partition of unity preserved for v, C, and L), and the
