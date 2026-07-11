@@ -62,6 +62,10 @@ load step:
   layer, the same artifact the explicit engine shows near Dirichlet planes. Top
   settlement 6.70 mm vs the free-sided analytic rho g h^2 / (2E) = 6.36 mm (5
   percent).
-- Next: warp port of the residual (one kernel, reusing the fork's B-spline weights),
-  contact-as-Dirichlet from the SDF colliders, gate 2 (implicit vs slow-explicit
-  plate press with matching wrench), then gate 3 (identification equivalence).
+- Warp port landed: src/warpmpm/implicit/quasistatic.py (float64 kernels for the
+  residual scatter and the commit; wp.eig3 for the principal-space log; masks and
+  GMRES in numpy/scipy). Passes the same gate 1 as the prototype
+  (tests/test_implicit_quasistatic.py).
+- Next: contact-as-Dirichlet from the SDF colliders and the tool wrench from the
+  residual on constrained nodes, gate 2 (implicit vs slow-explicit plate press with
+  matching wrench), then gate 3 (identification equivalence).
