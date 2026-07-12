@@ -395,6 +395,15 @@ class MPM_Simulator_WARP:
         self._cdf_tag_prev_stale_box = None  # tag grids: box where prev != cur
         self._cdf_stamp_count = 0       # stamps actually executed (skip diagnostics)
         self._cdf_force_stamp = False   # test hook: disable the static-pose skip
+        # host mirrors of the per-lane state arrays: _sync_cdf_lane uploads from
+        # these instead of reading the device arrays back (no per-substep stalls)
+        self._cdf_lane_host = {
+            "center": np.zeros((MAX_CDF, 3), dtype=np.float32),
+            "velocity": np.zeros((MAX_CDF, 3), dtype=np.float32),
+            "omega": np.zeros((MAX_CDF, 3), dtype=np.float32),
+            "friction": np.zeros(MAX_CDF, dtype=np.float32),
+            "type": np.zeros(MAX_CDF, dtype=np.int32),
+        }
 
         self.time = 0.0
 
@@ -2876,21 +2885,27 @@ class MPM_Simulator_WARP:
 
     def _sync_cdf_lane(self, lane, device="cpu"):
         """Mirror one collider's pose/material into the per-lane state arrays the
-        transfer kernels read (they cannot take collider structs)."""
+        transfer kernels read (they cannot take collider structs). Every value is
+        host-known (the collider params live on the host), so this writes host
+        mirrors and uploads them; it never reads a device array back. The old
+        read-modify-write did five .numpy() readbacks per call, and this runs per
+        moving lane per SUBSTEP, so on GPU each call stalled the stream five times
+        between graph launches."""
         p = self.cdf_params[lane]
-        for arr, val in ((self.mpm_state.cdf_lane_center, p.center),
-                         (self.mpm_state.cdf_lane_velocity, p.velocity),
-                         (self.mpm_state.cdf_lane_omega, p.omega)):
-            a = arr.numpy()
-            a[lane] = [val[0], val[1], val[2]]
-            wp.copy(arr, wp.array(a, dtype=wp.vec3, device=device))
-        f = self.mpm_state.cdf_lane_friction.numpy()
-        f[lane] = p.friction
-        wp.copy(self.mpm_state.cdf_lane_friction,
-                wp.array(f, dtype=float, device=device))
-        t = self.mpm_state.cdf_lane_type.numpy()
-        t[lane] = p.surface_type
-        wp.copy(self.mpm_state.cdf_lane_type, wp.array(t, dtype=int, device=device))
+        m = self._cdf_lane_host
+        m["center"][lane] = (p.center[0], p.center[1], p.center[2])
+        m["velocity"][lane] = (p.velocity[0], p.velocity[1], p.velocity[2])
+        m["omega"][lane] = (p.omega[0], p.omega[1], p.omega[2])
+        m["friction"][lane] = p.friction
+        m["type"][lane] = p.surface_type
+        st = self.mpm_state
+        wp.copy(st.cdf_lane_center, wp.array(m["center"], dtype=wp.vec3, device=device))
+        wp.copy(st.cdf_lane_velocity,
+                wp.array(m["velocity"], dtype=wp.vec3, device=device))
+        wp.copy(st.cdf_lane_omega, wp.array(m["omega"], dtype=wp.vec3, device=device))
+        wp.copy(st.cdf_lane_friction,
+                wp.array(m["friction"], dtype=float, device=device))
+        wp.copy(st.cdf_lane_type, wp.array(m["type"], dtype=int, device=device))
 
     def set_cdf_pose(self, handle, center=None, quat=None, velocity=None, omega=None,
                      device="cpu"):
