@@ -112,6 +112,30 @@ def cdf_copy_prev(state: MPMStateStruct, lo: wp.vec3i):
 
 
 @wp.kernel
+def cdf_block_mask(state: MPMStateStruct, model: MPMModelStruct, blo: wp.vec3i):
+    """Rebuild the coarse tag-occupancy blocks over a box of blocks: a block is
+    marked when any of its cells carries a tag in the cur OR prev grid (the fused
+    g2p half reads prev). Runs with each stamp over the stamp's dirty box, so the
+    mask is exactly as fresh as the tags the transfer kernels read."""
+    bi, bj, bk = wp.tid()
+    bi = bi + blo[0]
+    bj = bj + blo[1]
+    bk = bk + blo[2]
+    occ = int(0)
+    for i in range(0, 4):
+        for j in range(0, 4):
+            for k in range(0, 4):
+                ci = (bi << CDF_BLOCK_SHIFT_C) + i
+                cj = (bj << CDF_BLOCK_SHIFT_C) + j
+                ck = (bk << CDF_BLOCK_SHIFT_C) + k
+                if ci < model.grid_dim_x and cj < model.grid_dim_y \
+                        and ck < model.grid_dim_z:
+                    occ = occ | state.grid_cdf_tag[ci, cj, ck] \
+                        | state.grid_cdf_tag_prev[ci, cj, ck]
+    state.grid_cdf_block[bi, bj, bk] = occ
+
+
+@wp.kernel
 def cdf_stamp(time: float, state: MPMStateStruct, model: MPMModelStruct,
               param: CDFCollider, lo: wp.vec3i):
     """Stamp one CDF collider's side/validity bits (and owner distance) onto the
@@ -363,7 +387,8 @@ class MPM_Simulator_WARP:
         # CDF colliders should not pay ~113 MB for four unused grids). The lane
         # arrays are tiny and always allocated.
         self.mpm_model.n_cdf = 0
-        for name in ("grid_cdf_tag", "grid_cdf_tag_prev"):
+        self.mpm_model.cdf_mask_off = 0
+        for name in ("grid_cdf_tag", "grid_cdf_tag_prev", "grid_cdf_block"):
             setattr(self.mpm_state, name,
                     wp.zeros(shape=(1, 1, 1), dtype=int, device=device))
         for name in ("grid_cdf_d", "grid_cdf_d_prev"):
@@ -1083,7 +1108,8 @@ class MPM_Simulator_WARP:
             sig = (float(dt), bool(self.mpm_model.grid_v_damping_scale < 1.0),
                    st.particle_x.ptr, st.particle_v.ptr, st.particle_F.ptr,
                    st.particle_stress.ptr, st.grid_m.ptr,
-                   int(self.mpm_model.n_cdf), st.grid_cdf_tag.ptr)
+                   int(self.mpm_model.n_cdf), st.grid_cdf_tag.ptr,
+                   st.grid_cdf_block.ptr)
             if self._graph_sig != sig:
                 try:
                     self._capture_substep_graphs(dt, device, grid_size)
@@ -1433,7 +1459,8 @@ class MPM_Simulator_WARP:
                            bool(self.mpm_model.grid_v_damping_scale < 1.0),
                            st.particle_x.ptr, st.particle_v.ptr, st.particle_F.ptr,
                            st.particle_stress.ptr, st.grid_m.ptr, self.n_particles,
-                           int(self.mpm_model.n_cdf), st.grid_cdf_tag.ptr)
+                           int(self.mpm_model.n_cdf), st.grid_cdf_tag.ptr,
+                           st.grid_cdf_block.ptr)
                     box = self._fused_graph_box
                     inside = (self._fused_graph is not None
                               and self._fused_graph_sig == sig
@@ -2879,6 +2906,9 @@ class MPM_Simulator_WARP:
                                                 dtype=float, device=device)
             self.mpm_state.grid_cdf_d_prev = wp.full(shape=(ng, ng, ng), value=1.0e9,
                                                      dtype=float, device=device)
+            nb = (ng + CDF_BLOCK - 1) // CDF_BLOCK
+            self.mpm_state.grid_cdf_block = wp.zeros(shape=(nb, nb, nb), dtype=int,
+                                                     device=device)
         self.mpm_model.n_cdf = len(self.cdf_params)
         self._sync_cdf_lane(lane, device=device)
         return lane
@@ -3054,6 +3084,13 @@ class MPM_Simulator_WARP:
         else:
             wp.launch(cdf_copy_prev, dim=dims,
                       inputs=[self.mpm_state, lo_v], device=device)
+        # refresh the coarse occupancy blocks over the same box (cur OR prev):
+        # outside it neither grid changed, so neither did the mask
+        blo = tuple(lo[i] >> 2 for i in range(3))
+        bdims = tuple(((lo[i] + dims[i] - 1) >> 2) - blo[i] + 1 for i in range(3))
+        wp.launch(cdf_block_mask, dim=bdims,
+                  inputs=[self.mpm_state, self.mpm_model,
+                          wp.vec3i(blo[0], blo[1], blo[2])], device=device)
 
     def _cdf_copy_lane_prev(self):
         st = self.mpm_state

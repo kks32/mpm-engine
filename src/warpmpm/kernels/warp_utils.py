@@ -14,6 +14,10 @@ MAX_CDF = 4
 CDF_OWNER_SHIFT = 2 * MAX_CDF
 CDF_OWNER_SHIFT_C = wp.constant(CDF_OWNER_SHIFT)
 CDF_OWNER_MASK_C = wp.constant(3 << CDF_OWNER_SHIFT)
+# coarse tag-occupancy block edge (cells per block per axis, power of two): the
+# transfer kernels test at most 2^3 blocks per particle before the 27-node vote
+CDF_BLOCK = 4
+CDF_BLOCK_SHIFT_C = wp.constant(2)
 
 
 @wp.struct
@@ -72,6 +76,9 @@ class MPMModelStruct:
 
     ####### CPIC thin-boundary (CDF) colliders: 0 = feature off, transfers untouched
     n_cdf: int
+    # test hook: 1 forces the full tag vote even where the block mask is empty
+    # (the mask early-out is exact, and the bitwise gate proves it against this)
+    cdf_mask_off: int
 
 
 @wp.struct
@@ -126,6 +133,13 @@ class MPMStateStruct:
     grid_cdf_tag_prev: wp.array(dtype=int, ndim=3)
     grid_cdf_d: wp.array(dtype=float, ndim=3)
     grid_cdf_d_prev: wp.array(dtype=float, ndim=3)
+    # coarse occupancy: one int per CDF_BLOCK^3 cell block, nonzero when any cell
+    # of the block carries a tag in either the cur or prev grid. The transfer
+    # kernels test the blocks a particle's stencil touches before the 27-node tag
+    # vote; an all-empty stencil yields pc == 0 through the full path too, so the
+    # early-out is exact. Without it every particle paid the vote's ~108 extra
+    # global loads per substep whether or not it was near any surface.
+    grid_cdf_block: wp.array(dtype=int, ndim=3)
     # per-lane pose/material (length MAX_CDF; g2p_particle cannot take collider
     # structs, so the ghost projection reads these) and reaction accumulators
     cdf_lane_center: wp.array(dtype=wp.vec3)

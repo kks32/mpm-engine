@@ -711,6 +711,28 @@ def cdf_pair_incompatible(pc: int, nt: int) -> bool:
 
 
 @wp.func
+def cdf_stencil_near(state: MPMStateStruct, base_x: int, base_y: int,
+                     base_z: int) -> bool:
+    """Coarse pretest for the tag vote: true when any CDF_BLOCK^3 block touched by
+    the particle's 3x3x3 stencil carries a tag (cur or prev grid; the mask kernel
+    marks both). The early-out is exact, not approximate: an all-empty stencil
+    yields pc == 0 through the full vote and persistence path too, so skipping
+    them changes nothing. At most 8 block reads replace the vote's ~108 loads."""
+    bx0 = base_x >> CDF_BLOCK_SHIFT_C
+    bx1 = (base_x + 2) >> CDF_BLOCK_SHIFT_C
+    by0 = base_y >> CDF_BLOCK_SHIFT_C
+    by1 = (base_y + 2) >> CDF_BLOCK_SHIFT_C
+    bz0 = base_z >> CDF_BLOCK_SHIFT_C
+    bz1 = (base_z + 2) >> CDF_BLOCK_SHIFT_C
+    for bi in range(bx0, bx1 + 1):
+        for bj in range(by0, by1 + 1):
+            for bk in range(bz0, bz1 + 1):
+                if state.grid_cdf_block[bi, bj, bk] != 0:
+                    return True
+    return False
+
+
+@wp.func
 def cdf_particle_tag(state: MPMStateStruct, base_x: int, base_y: int, base_z: int,
                      w: wp.mat33, use_prev: int):
     """Reconstruct a particle's tag from node tags: affinity = any valid node in the
@@ -880,9 +902,14 @@ def p2g_particle(state: MPMStateStruct, model: MPMModelStruct, dt: float, p: int
 
     pc = int(0)
     if model.n_cdf > 0:
-        pc = cdf_persist_tag(
-            state.particle_cdf_tag[p],
-            cdf_particle_tag(state, base_pos_x, base_pos_y, base_pos_z, w, 0))
+        # block-mask pretest first: far from any tagged region the vote is a
+        # guaranteed pc == 0, so skip its 27-node reads (both operands of `or`
+        # evaluate in warp; the mask read is safe whenever n_cdf > 0)
+        if model.cdf_mask_off != 0 or cdf_stencil_near(state, base_pos_x,
+                                                       base_pos_y, base_pos_z):
+            pc = cdf_persist_tag(
+                state.particle_cdf_tag[p],
+                cdf_particle_tag(state, base_pos_x, base_pos_y, base_pos_z, w, 0))
 
     for i in range(0, 3):
         for j in range(0, 3):
@@ -976,10 +1003,15 @@ def g2p_particle(state: MPMStateStruct, model: MPMModelStruct, dt: float, p: int
         if model.n_cdf > 0:
             # gather-side tags come from the PREV stamp (the pose the scattered
             # grid state was built under); the split pipeline copies cur -> prev
-            # after stamping so both reads see the same pose there
-            pc = cdf_persist_tag(
-                state.particle_cdf_tag[p],
-                cdf_particle_tag(state, base_pos_x, base_pos_y, base_pos_z, w, 1))
+            # after stamping so both reads see the same pose there. The block-mask
+            # pretest covers cur AND prev, so skipping the vote here is exact; the
+            # tag store still runs so a particle leaving all tagged regions drops
+            # its persisted tag exactly as the full path would.
+            if model.cdf_mask_off != 0 or cdf_stencil_near(state, base_pos_x,
+                                                           base_pos_y, base_pos_z):
+                pc = cdf_persist_tag(
+                    state.particle_cdf_tag[p],
+                    cdf_particle_tag(state, base_pos_x, base_pos_y, base_pos_z, w, 1))
             state.particle_cdf_tag[p] = pc
             if pc != 0:
                 ghost = cdf_particle_ghost(state, model, dt, p, pc,

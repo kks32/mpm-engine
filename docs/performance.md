@@ -90,18 +90,37 @@ works as a scale while the CDF wrench under-reads the transferred weight by an
 order of magnitude (contact routes through the incompatible weight fraction;
 the readout is documented as approximate).
 
-Cost at 96^3 on CPU with two CDF lanes: the fused pass goes from 25.7 to 37.3 ms
-per substep (the in-kernel tag vote and ghost-velocity path, paid whenever CDF
-is active) plus host-side stamping launches. The stamp kernels take live poses
-by value and stay outside CUDA graph capture, which made them the dominant CDF
-cost on GPU (1.3 to 2.2 s per frame at 192^3 on a GH200, against 344 ms for the
-SDF pour). Tags are a pure function of pose, so lanes restamp only when their
-pose changes, and the zero/stamp/copy is restricted to the dirty lanes' boxes: a
-resting collider costs no per-substep host work at all, a static receiver stops
-paying for a moving source, and the skip is pinned bitwise against always-stamp
-in both pipelines (tests/test_cdf_stamp_skip.py). On CPU this removes 5.0 of the
-5.3 ms per substep in static phases (pour settle 227 to 201 s); the GPU number
-after the skip is a Vista gate.
+Where the CDF cost actually lives, established by the GH200 per-phase profile:
+the in-kernel tag vote. With lanes active, every particle reconstructed its tag
+from 27 nodes twice per substep (once per fused half, tag and distance grids
+both), which put g2p2g_fused at 2.93 ms per substep against roughly 0.65 for the
+SDF pour, 93 percent of device time, and grew with the contacting population
+(the pour ended near 2 s per frame against the SDF's 338 ms sim rate). Lane
+count is not a factor (MAX_CDF 2 and 4 profile identically), so the vote's
+register footprint is not the lever; the loads and the divergent ghost branches
+are. Two mitigations ship, both pinned bitwise against their exhaustive paths:
+
+1. Stamp skip (tests/test_cdf_stamp_skip.py): tags are a pure function of pose,
+   so lanes restamp only when their pose changes, restricted to the dirty lanes'
+   boxes. A resting collider costs no per-substep host work; on CPU this removes
+   5.0 of 5.3 ms per substep in static phases (settle 227 to 201 s). Stamping is
+   minor on GPU too (0.38 ms per substep in the profile).
+2. Block-mask early-out (tests/test_cdf_mask.py): a coarse occupancy grid (one
+   int per 4^3 cells, maintained by the stamp over its own box) lets a particle
+   whose stencil touches no tagged block skip the vote for at most 8 block
+   reads. The skip is exact, since an all-empty stencil yields pc == 0 through
+   the full vote too. The benefit scales with the far-field fraction: mid-air
+   streams and open domains drop to near baseline, while fluid CONTAINED in a
+   CDF vessel sits mostly within a few cells of a tagged sheet and keeps paying
+   (at 96^3 the whole cavity is inside the near shell and the mask saves
+   nothing; at 192^3 roughly a third to a half of the contained interior is
+   far). That residual is the method's price in the containment regime and no
+   conservative mask can remove it, which is one more reason SDF stays the
+   collider for bulk containers.
+
+Baseline CPU cost at 96^3 with two lanes and the cavity fully in contact: the
+fused pass runs 25.7 to 37.3 ms per substep with CDF active. The 192^3 GH200
+re-profile with both mitigations is a Vista gate.
 
 ### Fused particle pass (G2P2G)
 
