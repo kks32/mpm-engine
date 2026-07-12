@@ -83,11 +83,25 @@ is soft, so pressed fluid sits a few millimetres inside the sheet band and the
 solid-interior audit counts it as embedded even though the sheet holds it, and the
 rim carries an untagged exclusion tube of one CDF band (16 mm at 96^3, shrinking
 linearly with dx) that makes the spout sloppier than the SDF's fully resolved rim.
+At 192^3 on a GH200 the CDF pour transfers cleanly (receiver 40 percent of the
+fill, final spill 254 of 340k particles, 0.07 percent, confirming the rim gap
+shrinks with dx), but do not read wrenches through it: the receiving SDF glass
+works as a scale while the CDF wrench under-reads the transferred weight by an
+order of magnitude (contact routes through the incompatible weight fraction;
+the readout is documented as approximate).
+
 Cost at 96^3 on CPU with two CDF lanes: the fused pass goes from 25.7 to 37.3 ms
-per substep (the in-kernel tag vote and ghost-velocity path) plus 5.3 ms per
-substep of host-side stamping launches, 5.9 to 9.4 s per frame overall. The stamp
-kernels take live poses by value and stay outside CUDA graph capture; the GPU
-overhead number is a 192^3 Vista gate.
+per substep (the in-kernel tag vote and ghost-velocity path, paid whenever CDF
+is active) plus host-side stamping launches. The stamp kernels take live poses
+by value and stay outside CUDA graph capture, which made them the dominant CDF
+cost on GPU (1.3 to 2.2 s per frame at 192^3 on a GH200, against 344 ms for the
+SDF pour). Tags are a pure function of pose, so lanes restamp only when their
+pose changes, and the zero/stamp/copy is restricted to the dirty lanes' boxes: a
+resting collider costs no per-substep host work at all, a static receiver stops
+paying for a moving source, and the skip is pinned bitwise against always-stamp
+in both pipelines (tests/test_cdf_stamp_skip.py). On CPU this removes 5.0 of the
+5.3 ms per substep in static phases (pour settle 227 to 201 s); the GPU number
+after the skip is a Vista gate.
 
 ### Fused particle pass (G2P2G)
 
