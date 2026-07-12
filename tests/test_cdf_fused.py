@@ -97,5 +97,35 @@ def test_cdf_fused_graph_replay_bitwise_on_cuda():
         np.testing.assert_array_equal(a, b)
 
 
+def test_cdf_stamp_skip_under_graphs_on_cuda():
+    """The stamp skip's CUDA paths: a static collider runs long stretches of graph
+    replays with NO live stamp launches between them, and a stop-start collider
+    crosses skip -> stamp -> skip transitions (the recorded stale box reconciles
+    the prev tags at the first read after each stretch). Graphs on vs off must be
+    bitwise-identical through both. Needs a GPU; a Vista gate."""
+    import warp as wp
+    if wp.get_cuda_device_count() == 0:
+        pytest.skip("needs CUDA")
+    import os
+    out = {}
+    for graphs in (True, False):
+        os.environ.pop("WARPMPM_NO_CUDA_GRAPH", None)
+        if not graphs:
+            os.environ["WARPMPM_NO_CUDA_GRAPH"] = "1"
+        s = _scene(fused=True, moving=False, device="cuda:0")
+        for _ in range(4):
+            s.step(2e-4, 10)
+        s.set_cdf_pose(0, velocity=(0.0, 0.0, 0.01))
+        for _ in range(3):
+            s.step(2e-4, 10)
+        s.set_cdf_pose(0, velocity=(0.0, 0.0, 0.0))
+        for _ in range(3):
+            s.step(2e-4, 10)
+        out[graphs] = (s.x(), s.v(), s.F())
+    os.environ.pop("WARPMPM_NO_CUDA_GRAPH", None)
+    for a, b in zip(out[True], out[False], strict=True):
+        np.testing.assert_array_equal(a, b)
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
