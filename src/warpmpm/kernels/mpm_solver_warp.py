@@ -383,7 +383,18 @@ class MPM_Simulator_WARP:
         self.cdf_aabbs = []
         self.cdf_labels = []
         self._cdf_guard = {}
-        self._cdf_prev_stamp_box = None
+        # static-pose stamp skip: a lane restamps only when its pose changed. Tags
+        # are pose functions, so an unchanged pose means the stamped bits are already
+        # current and the whole zero/stamp/copy sequence (live launches, outside any
+        # captured graph) can be skipped; this is what keeps CDF colliders from
+        # costing per-substep host time while they sit still.
+        self._cdf_lane_dirty = []       # per lane: pose changed since its last stamp
+        self._cdf_lane_active = []      # per lane: last-seen start/end window state
+        self._cdf_lane_prev_box = []    # per lane: grid box its last stamp covered
+        self._cdf_lane_prev_stale = False   # lane pose arrays: prev != cur
+        self._cdf_tag_prev_stale_box = None  # tag grids: box where prev != cur
+        self._cdf_stamp_count = 0       # stamps actually executed (skip diagnostics)
+        self._cdf_force_stamp = False   # test hook: disable the static-pose skip
 
         self.time = 0.0
 
@@ -1483,10 +1494,8 @@ class MPM_Simulator_WARP:
         # audit, and the next tick's prologue see exactly what p2g2p would produce.
         # Its gather reads the LAST substep's grid state, so the tag prev buffers
         # must hold that substep's colors (the lane-pose prev already does).
-        if self.mpm_model.n_cdf > 0 and self._cdf_prev_stamp_box is not None:
-            lo, dims = self._cdf_prev_stamp_box   # the box the last stamp covered
-            wp.launch(cdf_copy_prev, dim=dims,
-                      inputs=[self.mpm_state, wp.vec3i(*lo)], device=device)
+        if self.mpm_model.n_cdf > 0:
+            self._cdf_reconcile_prev(device)
         with wp.ScopedTimer("g2p", synchronize=self.profile, active=self.profile,
                             print=False, dict=self.time_profile):
             wp.launch(kernel=g2p, dim=self.n_particles,
@@ -2844,6 +2853,9 @@ class MPM_Simulator_WARP:
             return self._grid_box(pts.min(axis=0), pts.max(axis=0), halo=2)
 
         self.cdf_aabbs.append(cdf_aabb)
+        self._cdf_lane_dirty.append(True)
+        self._cdf_lane_active.append(self.time >= start_time and self.time < end_time)
+        self._cdf_lane_prev_box.append(None)
 
         # first CDF collider: allocate the real tag/distance grids in place of the
         # placeholders (the graph signature carries the tag pointer, so any captured
@@ -2906,82 +2918,156 @@ class MPM_Simulator_WARP:
                     f" material in the swept region can end up on the wrong side. "
                     f"Drive the pose in smaller per-tick steps.",
                     RuntimeWarning, stacklevel=2)
+        moved = synced = False
         if center is not None:
-            p.center = wp.vec3(float(center[0]), float(center[1]), float(center[2]))
+            new = wp.vec3(float(center[0]), float(center[1]), float(center[2]))
+            moved |= tuple(new) != tuple(p.center)
+            p.center = new
         if quat is not None:
-            p.quat = wp.quat(float(quat[0]), float(quat[1]), float(quat[2]),
-                             float(quat[3]))
+            new = wp.quat(float(quat[0]), float(quat[1]), float(quat[2]),
+                          float(quat[3]))
+            moved |= tuple(new) != tuple(p.quat)
+            p.quat = new
         if velocity is not None:
-            p.velocity = wp.vec3(float(velocity[0]), float(velocity[1]),
-                                 float(velocity[2]))
+            new = wp.vec3(float(velocity[0]), float(velocity[1]), float(velocity[2]))
+            synced |= tuple(new) != tuple(p.velocity)
+            p.velocity = new
         if omega is not None:
-            p.omega = wp.vec3(float(omega[0]), float(omega[1]), float(omega[2]))
-        self._sync_cdf_lane(handle, device=device)
+            new = wp.vec3(float(omega[0]), float(omega[1]), float(omega[2]))
+            synced |= tuple(new) != tuple(p.omega)
+            p.omega = new
+        # tags depend on center and quat only; velocity/omega feed the ghost through
+        # the lane arrays. An identical repeated pose (a held glass commanded every
+        # tick) marks nothing and the per-substep stamp skip stays in effect.
+        if moved:
+            self._cdf_lane_dirty[handle] = True
+        if moved or synced:
+            self._sync_cdf_lane(handle, device=device)
+            self._cdf_lane_prev_stale = True
 
-    def _cdf_stamp_box(self):
-        """Union of the CDF colliders' AABBs with the previous stamp box, so nodes a
-        collider left get cleared exactly once (the zeroing idiom the grid box uses)."""
-        boxes = [f() for f in self.cdf_aabbs]
-        boxes = [b for b in boxes if b is not None]
-        if self._cdf_prev_stamp_box is not None:
-            boxes.append(self._cdf_prev_stamp_box)
+    def _cdf_dirty_box(self):
+        """Union of the DIRTY lanes' current AABBs with the boxes their last stamps
+        covered, so nodes a collider left get cleared exactly once. Static lanes'
+        bits are untouched outside this box; inside it every lane restamps (zeroing
+        erases all lanes' bits there). Updates the per-lane prev boxes."""
+        boxes = []
+        for lane, f in enumerate(self.cdf_aabbs):
+            if not self._cdf_lane_dirty[lane]:
+                continue
+            b = f()
+            prev = self._cdf_lane_prev_box[lane]
+            if b is not None:
+                boxes.append(b)
+            if prev is not None:
+                boxes.append(prev)
+            self._cdf_lane_prev_box[lane] = b
         if not boxes:
             return None
         lo = tuple(min(b[0][i] for b in boxes) for i in range(3))
-        hi_dims = tuple(max(b[0][i] + b[1][i] for b in boxes) for i in range(3))
-        dims = tuple(hi_dims[i] - lo[i] for i in range(3))
-        cur = [f() for f in self.cdf_aabbs if f() is not None]
-        self._cdf_prev_stamp_box = None
-        if cur:
-            clo = tuple(min(b[0][i] for b in cur) for i in range(3))
-            chi = tuple(max(b[0][i] + b[1][i] for b in cur) for i in range(3))
-            self._cdf_prev_stamp_box = (clo, tuple(chi[i] - clo[i] for i in range(3)))
-        return (lo, dims)
+        hi = tuple(max(b[0][i] + b[1][i] for b in boxes) for i in range(3))
+        return (lo, tuple(hi[i] - lo[i] for i in range(3)))
+
+    @staticmethod
+    def _cdf_box_intersect(a, b):
+        if a is None or b is None:
+            return None
+        lo = tuple(max(a[0][i], b[0][i]) for i in range(3))
+        hi = tuple(min(a[0][i] + a[1][i], b[0][i] + b[1][i]) for i in range(3))
+        if any(hi[i] <= lo[i] for i in range(3)):
+            return None
+        return (lo, tuple(hi[i] - lo[i] for i in range(3)))
+
+    def _cdf_reconcile_prev(self, device):
+        """Bring the prev tag grids up to cur wherever they still differ (the box of
+        the last lag_prev stamp). Every read path calls this before trusting prev."""
+        if self._cdf_tag_prev_stale_box is not None:
+            lo, dims = self._cdf_tag_prev_stale_box
+            wp.launch(cdf_copy_prev, dim=dims,
+                      inputs=[self.mpm_state, wp.vec3i(lo[0], lo[1], lo[2])],
+                      device=device)
+            self._cdf_tag_prev_stale_box = None
 
     def _stamp_cdf(self, dt, device, lag_prev=False):
-        """Per-substep tag maintenance. Split pipeline (lag_prev False): zero, stamp,
-        copy cur -> prev so the g2p of THIS substep reads this pose's colors. Fused
-        pipeline (lag_prev True): copy cur -> prev FIRST so the fused g2p half reads
-        the previous substep's colors while the p2g half reads this substep's. The
-        lane pose arrays follow the same discipline in _integrate_cdf_poses."""
+        """Per-substep tag maintenance with a static-pose skip: a lane restamps only
+        when its pose changed (dirty), and the zero/stamp/copy sequence is restricted
+        to the dirty lanes' boxes. With every pose unchanged the call is free, which
+        is what keeps resting CDF colliders off the per-substep host-launch path
+        (these kernels take live poses by value and cannot live inside a captured
+        graph).
+
+        prev-buffer discipline: the fused pipeline's g2p half reads colors(s-1) from
+        the prev grids while the p2g half reads colors(s) from cur, so with lag_prev
+        the stale region of prev is reconciled to cur BEFORE this substep's stamp
+        overwrites cur, and the freshly stamped box becomes the new stale region.
+        The split pipeline reads prev == cur within the substep, so it reconciles
+        and then copies its own stamp box after stamping, leaving nothing stale."""
         if self.mpm_model.n_cdf == 0:
             return
-        box = self._cdf_stamp_box()
+        self._cdf_reconcile_prev(device)
+        # a start/end window opening or closing changes the stamped bits without
+        # any pose motion; the stamp kernel gates on time, so a restamp at the
+        # transition is what clears (or lays down) the lane's tags
+        for lane, param in enumerate(self.cdf_params):
+            active = self.time >= param.start_time and self.time < param.end_time
+            if active != self._cdf_lane_active[lane]:
+                self._cdf_lane_active[lane] = active
+                self._cdf_lane_dirty[lane] = True
+        if self._cdf_force_stamp:
+            self._cdf_lane_dirty = [True] * len(self.cdf_params)
+        if not any(self._cdf_lane_dirty):
+            return
+        box = self._cdf_dirty_box()
+        self._cdf_lane_dirty = [False] * len(self.cdf_params)
         if box is None:
             return
+        self._cdf_stamp_count += 1
         lo, dims = box
         lo_v = wp.vec3i(lo[0], lo[1], lo[2])
-        if lag_prev:
-            wp.launch(cdf_copy_prev, dim=dims,
-                      inputs=[self.mpm_state, lo_v], device=device)
         wp.launch(cdf_zero_tags, dim=dims,
                   inputs=[self.mpm_state, lo_v], device=device)
-        for param in self.cdf_params:
-            wp.launch(cdf_stamp, dim=dims,
-                      inputs=[self.time, self.mpm_state, self.mpm_model, param, lo_v],
+        for lane, param in enumerate(self.cdf_params):
+            clip = self._cdf_box_intersect(box, self.cdf_aabbs[lane]())
+            if clip is None:
+                continue
+            clo, cdims = clip
+            wp.launch(cdf_stamp, dim=cdims,
+                      inputs=[self.time, self.mpm_state, self.mpm_model, param,
+                              wp.vec3i(clo[0], clo[1], clo[2])],
                       device=device)
-        if not lag_prev:
+        if lag_prev:
+            self._cdf_tag_prev_stale_box = box
+        else:
             wp.launch(cdf_copy_prev, dim=dims,
                       inputs=[self.mpm_state, lo_v], device=device)
+
+    def _cdf_copy_lane_prev(self):
+        st = self.mpm_state
+        wp.copy(st.cdf_lane_center_prev, st.cdf_lane_center)
+        wp.copy(st.cdf_lane_velocity_prev, st.cdf_lane_velocity)
+        wp.copy(st.cdf_lane_omega_prev, st.cdf_lane_omega)
+        self._cdf_lane_prev_stale = False
 
     def _integrate_cdf_poses(self, dt, lag_prev=False):
         """Advance CDF collider poses one substep (the modify_bc analogue) and keep
         the lane arrays in step. With lag_prev, current lane poses are copied to the
-        prev arrays before the update (the fused pipeline's discipline)."""
+        prev arrays before the update (the fused pipeline's discipline). Static lanes
+        (zero velocity and omega) advance to themselves, so they skip the update and
+        the per-substep lane sync; the prev copies run only while prev differs from
+        cur (a lane moved or set_cdf_pose changed one), so a scene of resting CDF
+        colliders does no per-substep host work here at all."""
         if not self.cdf_params:
             return
-        st = self.mpm_state
-        if lag_prev:
-            wp.copy(st.cdf_lane_center_prev, st.cdf_lane_center)
-            wp.copy(st.cdf_lane_velocity_prev, st.cdf_lane_velocity)
-            wp.copy(st.cdf_lane_omega_prev, st.cdf_lane_omega)
+        if lag_prev and self._cdf_lane_prev_stale:
+            self._cdf_copy_lane_prev()
         for lane, param in enumerate(self.cdf_params):
             if not (self.time >= param.start_time and self.time < param.end_time):
                 continue
-            guard = self._cdf_guard[lane]
-            c = param.center
             v = param.velocity
             w = np.array([param.omega[0], param.omega[1], param.omega[2]], dtype=float)
+            if v[0] == 0.0 and v[1] == 0.0 and v[2] == 0.0 and not w.any():
+                continue
+            guard = self._cdf_guard[lane]
+            c = param.center
             speed = float(np.hypot(np.hypot(v[0], v[1]), v[2])) \
                 + float(np.linalg.norm(w)) * guard["r_max"]
             if speed * dt > guard["band"] and not guard["warned"]:
@@ -2999,10 +3085,10 @@ class MPM_Simulator_WARP:
             q = _omega_step_quat(q, w, dt)
             param.quat = wp.quat(float(q[0]), float(q[1]), float(q[2]), float(q[3]))
             self._sync_cdf_lane(lane, device=self._device_of_state())
-        if not lag_prev:
-            wp.copy(st.cdf_lane_center_prev, st.cdf_lane_center)
-            wp.copy(st.cdf_lane_velocity_prev, st.cdf_lane_velocity)
-            wp.copy(st.cdf_lane_omega_prev, st.cdf_lane_omega)
+            self._cdf_lane_dirty[lane] = True
+            self._cdf_lane_prev_stale = True
+        if not lag_prev and self._cdf_lane_prev_stale:
+            self._cdf_copy_lane_prev()
 
     def _device_of_state(self):
         return str(self.mpm_state.particle_x.device)
