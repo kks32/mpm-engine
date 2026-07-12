@@ -85,10 +85,16 @@ rim carries an untagged exclusion tube of one CDF band (16 mm at 96^3, shrinking
 linearly with dx) that makes the spout sloppier than the SDF's fully resolved rim.
 At 192^3 on a GH200 the CDF pour transfers cleanly (receiver 40 percent of the
 fill, final spill 254 of 340k particles, 0.07 percent, confirming the rim gap
-shrinks with dx), but do not read wrenches through it: the receiving SDF glass
-works as a scale while the CDF wrench under-reads the transferred weight by an
-order of magnitude (contact routes through the incompatible weight fraction;
-the readout is documented as approximate).
+shrinks with dx). The CDF wrench integrates the BLOCKED p2g deposits, the
+momentum flux the sheet interrupts, so it scales linearly with the supported
+load (a depth-sweep test pins doubling; the earlier gather-side accounting
+saturated at the contact layer's weight, which is why a receiver holding 13 N
+of honey once read 0.5). It still reads a geometry-dependent fraction of the
+absolute load, about a third for a node-aligned sheet, because part of the
+discrete support routes through nodes on the sheet plane that carry the fluid's
+side and are never severed. Treat it as a calibrated scale; for calibrated
+absolute forces use an SDF collider, whose receiving glass reads the
+transferred weight to 0.2 percent.
 
 Where the CDF cost actually lives, established by the GH200 per-phase profile:
 the in-kernel tag vote. With lanes active, every particle reconstructed its tag

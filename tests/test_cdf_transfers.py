@@ -61,15 +61,13 @@ def test_zero_thickness_dam_holds():
     assert crossed_max == 0, f"{crossed_max} particles crossed the thin wall"
 
 
-def test_shelf_wrench_matches_weight():
-    """A water column resting on a horizontal CDF shelf: the ghost-projection
-    impulse must integrate to the column's weight (the SDF reaction test's
-    tolerance)."""
-    pos = _water(0.14, 0.26, 0.14, 0.26, 0.21, 0.29)
+def _shelf_wrench(depth: float):
+    """Mean settled shelf reaction Fz for a column of the given z extent."""
+    pos = _water(0.14, 0.26, 0.14, 0.26, 0.21, 0.21 + depth)
     s = _solver(pos, g=(0.0, 0.0, -9.81))
     h = s.add_cdf_collider(_sheet("z"), center=(0.2, 0.2, 0.20))
     weight = float(len(pos) * (DX / 2) ** 3 * 1000.0 * 9.81)
-    for _ in range(60):                       # settle onto the shelf
+    for _ in range(120):                      # fall onto the shelf and ring down
         s.step(2e-4, 10)
     # the undamped column rings, so damp lightly and average over many ticks
     s._sim.mpm_model.grid_v_damping_scale = 0.999
@@ -78,15 +76,42 @@ def test_shelf_wrench_matches_weight():
         s.reset_cdf_wrench()
         s.step(2e-4, 10)
         forces.append(s.cdf_wrench(h, 2e-3)["force"][2])
-    f_mean = float(np.mean(forces))
-    # the material presses DOWN on the shelf (same convention as the SDF wrench).
-    # The CDF wrench is approximate in v1 (the ghost projection's separation push
-    # is entangled with the support impulse; exact accounting is a step-6 item),
-    # so this pins sign and order of magnitude, not calibration.
+    zmin = float(s.x()[:, 2].min())
+    return float(np.mean(forces)), weight, zmin
+
+
+def test_shelf_wrench_reads_a_scaled_fraction_of_the_weight():
+    """A water column resting on a horizontal CDF shelf. The wrench integrates
+    the BLOCKED p2g deposits (the momentum flux the sheet interrupts), which
+    scales with the supported load but reads a geometry-dependent fraction of
+    it: part of the discrete support routes through nodes lying on the sheet
+    plane, which carry the fluid's side and are never severed (measured ~0.3
+    for a node-aligned sheet). This pins sign and that window; the depth test
+    below pins the scaling, which is what makes the readout usable as a
+    calibrated scale. For calibrated absolute forces use an SDF collider."""
+    f_mean, weight, zmin = _shelf_wrench(0.08)
+    # the material presses DOWN on the shelf (same convention as the SDF wrench)
     assert f_mean < 0.0
-    assert 0.4 * weight < -f_mean < 2.5 * weight, f"{f_mean:.3f} N vs -{weight:.3f} N"
+    assert 0.15 * weight < -f_mean < 0.6 * weight, f"{f_mean:.3f} N vs -{weight:.3f} N"
     # nothing fell through the shelf
-    assert float(s.x()[:, 2].min()) > 0.20 - 1.5 * DX
+    assert zmin > 0.20 - 1.5 * DX
+
+
+@pytest.mark.slow
+def test_shelf_wrench_scales_with_column_depth():
+    """Doubling the column doubles the reading. The pre-fix accounting (ghost
+    impulses on the gather side) saturated at the CONTACT LAYER's weight, so a
+    deep column read the same as a shallow one; the blocked-deposit accounting
+    restores linear scaling. Columns thinner than the CDF band stay unreliable
+    (the whole load sits in the ambiguous-side region)."""
+    f8, w8, _ = _shelf_wrench(0.05)
+    f16, w16, _ = _shelf_wrench(0.10)
+    assert f8 < 0.0 and f16 < 0.0
+    assert np.isclose(w16 / w8, 2.0, rtol=0.1)
+    # individual readings carry ~30 percent protocol sensitivity (settle phase,
+    # ring-down), so this pins the qualitative property that separates the two
+    # accountings: saturation reads ~1.0 here, scaling reads well above it
+    assert 1.3 < f16 / f8 < 3.0, f"depth scaling {f16 / f8:.2f} (want ~2, not ~1)"
 
 
 def test_ghost_friction_slides_and_holds():

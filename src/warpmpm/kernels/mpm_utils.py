@@ -920,12 +920,6 @@ def p2g_particle(state: MPMStateStruct, model: MPMModelStruct, dt: float, p: int
                 ix = base_pos_x + i
                 iy = base_pos_y + j
                 iz = base_pos_z + k
-                # nested on purpose: warp does NOT short-circuit `and`, and when
-                # n_cdf == 0 the tag grids are (1,1,1) placeholders that must not
-                # be indexed (pc != 0 implies the real grids exist)
-                if pc != 0:
-                    if cdf_pair_incompatible(pc, state.grid_cdf_tag[ix, iy, iz]):
-                        continue  # CPIC: no transfer across the thin boundary
                 weight = w[0, i] * w[1, j] * w[2, k]  # tricubic interpolation
                 dweight = compute_dweight(model, w, dw, i, j, k)
                 C = state.particle_C[p]
@@ -944,6 +938,28 @@ def p2g_particle(state: MPMStateStruct, model: MPMModelStruct, dt: float, p: int
                     * (state.particle_v[p] + C * dpos)
                     + dt * elastic_force
                 )
+                # nested on purpose: warp does NOT short-circuit `and`, and when
+                # n_cdf == 0 the tag grids are (1,1,1) placeholders that must not
+                # be indexed (pc != 0 implies the real grids exist)
+                if pc != 0:
+                    nt = state.grid_cdf_tag[ix, iy, iz]
+                    if cdf_pair_incompatible(pc, nt):
+                        # CPIC: no transfer across the thin boundary. The blocked
+                        # deposit IS the momentum flux the sheet interrupts, so it
+                        # is the reaction impulse on the sheet: a resting column's
+                        # weight arrives through the stress term and an impact's
+                        # m*v through the momentum term. (The ghost projection on
+                        # the gather side corrects only the contact layer's
+                        # kinematics; accounting there under-reads a deep column
+                        # by the layer-to-column mass ratio.)
+                        own = (nt >> CDF_OWNER_SHIFT_C) & 3
+                        xw = wp.vec3(wp.float(ix), wp.float(iy),
+                                     wp.float(iz)) * model.dx
+                        wp.atomic_add(state.cdf_reaction_force, own, v_in_add)
+                        wp.atomic_add(
+                            state.cdf_reaction_torque, own,
+                            wp.cross(xw - state.cdf_lane_center[own], v_in_add))
+                        continue
                 wp.atomic_add(state.grid_v_in, ix, iy, iz, v_in_add)
                 wp.atomic_add(
                     state.grid_m, ix, iy, iz, weight * state.particle_mass[p]
@@ -1037,18 +1053,11 @@ def g2p_particle(state: MPMStateStruct, model: MPMModelStruct, dt: float, p: int
                     if incompat:
                         # CPIC ghost fill: the particle's collided velocity stands
                         # in for the incompatible node with the node's own weight
-                        # (partition of unity preserved for v, C, and L), and the
-                        # momentum the projection removes is the reaction impulse
-                        t_prev = state.grid_cdf_tag_prev[ix, iy, iz]
-                        own = (t_prev >> CDF_OWNER_SHIFT_C) & 3
-                        imp = weight * state.particle_mass[p] * (
-                            state.particle_v[p]
-                            + dt * model.gravitational_accelaration - ghost)
-                        wp.atomic_add(state.cdf_reaction_force, own, imp)
-                        wp.atomic_add(
-                            state.cdf_reaction_torque, own,
-                            wp.cross(state.particle_x[p]
-                                     - state.cdf_lane_center_prev[own], imp))
+                        # (partition of unity preserved for v, C, and L). The
+                        # reaction wrench is accounted on the SCATTER side (the
+                        # blocked p2g deposits); accumulating the projection's
+                        # momentum change here as well would double-count the
+                        # m*v flux of an impact.
                         grid_v = ghost
                     new_v = new_v + grid_v * weight
                     new_C = new_C + wp.outer(grid_v, dpos) * (

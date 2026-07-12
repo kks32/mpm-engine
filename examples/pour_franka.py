@@ -422,7 +422,10 @@ def run(device: str = "auto", n_grid: int = 192, video: bool = True, cfl: float 
                            velocity=vel, omega=omega)
             s.reset_cdf_wrench()
             s.step(dt, substeps)
-            w_src = s.cdf_wrench(src, dt_tick)  # approximate for CDF; see solver docs
+            # CDF wrench scales with load but reads a geometry-dependent fraction
+            # of it (~1/3); see docs/performance.md. The SDF cup is the calibrated
+            # scale.
+            w_src = s.cdf_wrench(src, dt_tick)
             w_rcv = s.cdf_wrench(rcv, dt_tick)
         else:
             s.set_cup(src, center=p0 + WORLD_TO_MPM, quat=q0, velocity=vel, omega=omega)
