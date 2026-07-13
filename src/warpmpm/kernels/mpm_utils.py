@@ -35,7 +35,10 @@ def kirchoff_stress_newtonian(
     # with p from the water EOS, D = sym(L), and |gd|_eps = sqrt(2 dev(D):dev(D)
     # + eps^2) the regularized deviatoric shear rate. tau_y=0, pk=0 -> Newtonian;
     # pk>0, pn<1 -> shear-thinning power law. Kirchhoff = J * Cauchy.
-    eps = 0.05
+    # eps matches MATH_REFERENCE.md and the identifier's EPS_GAMMA_DEFAULT: a law
+    # identified at one regularization and replayed at another is a different law
+    # at low shear.
+    eps = 0.02
     gamma = 1.1
     pressure = -bulk * (wp.pow(J, -gamma) - 1.0)
     id = wp.mat33(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
@@ -59,8 +62,8 @@ def kirchoff_stress_tabulated(
     # but eta_app(gd) is read from a TABLE on s = log10(gd) in [smin, smax] (n uniform
     # samples) with clamped linear interpolation, instead of the parametric HB formula.
     # This lets an FE-recovered eta_app(gd) curve be re-simulated directly. eps and the
-    # EOS match the newtonian kernel exactly.
-    eps = 0.05
+    # EOS match the newtonian kernel exactly (0.02, MATH_REFERENCE.md).
+    eps = 0.02
     gamma = 1.1
     pressure = -bulk * (wp.pow(J, -gamma) - 1.0)
     id = wp.mat33(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
@@ -95,25 +98,6 @@ def kirchoff_stress_neoHookean(
     tau = mu * J ** (-2.0 / 3.0) * b_hat + lam / 2.0 * (J * J - 1.0) * wp.vec3(
         1.0, 1.0, 1.0
     )
-    return (
-        U
-        * wp.mat33(tau[0], 0.0, 0.0, 0.0, tau[1], 0.0, 0.0, 0.0, tau[2])
-        * wp.transpose(V)
-        * wp.transpose(F)
-    )
-
-
-@wp.func
-def kirchoff_stress_StVK(
-    F: wp.mat33, U: wp.mat33, V: wp.mat33, sig: wp.vec3, mu: float, lam: float
-):
-    sig = wp.vec3(
-        wp.max(sig[0], 0.01), wp.max(sig[1], 0.01), wp.max(sig[2], 0.01)
-    )  # add this to prevent NaN in extrem cases
-    epsilon = wp.vec3(wp.log(sig[0]), wp.log(sig[1]), wp.log(sig[2]))
-    log_sig_sum = wp.log(sig[0]) + wp.log(sig[1]) + wp.log(sig[2])
-    ONE = wp.vec3(1.0, 1.0, 1.0)
-    tau = 2.0 * mu * epsilon + lam * log_sig_sum * ONE
     return (
         U
         * wp.mat33(tau[0], 0.0, 0.0, 0.0, tau[1], 0.0, 0.0, 0.0, tau[2])
@@ -241,54 +225,6 @@ def von_mises_return_mapping_with_damage(
         return F_trial
 
 
-# for toothpaste
-@wp.func
-def viscoplasticity_return_mapping_with_StVK(
-    F_trial: wp.mat33, model: MPMModelStruct, p: int, mat: int, dt: float
-):
-    U = wp.mat33(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
-    V = wp.mat33(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
-    sig_old = wp.vec3(0.0)
-    wp.svd3(F_trial, U, sig_old, V)
-
-    sig = wp.vec3(
-        wp.max(sig_old[0], 0.01), wp.max(sig_old[1], 0.01), wp.max(sig_old[2], 0.01)
-    )  # add this to prevent NaN in extrem cases
-    b_trial = wp.vec3(sig[0] * sig[0], sig[1] * sig[1], sig[2] * sig[2])
-    epsilon = wp.vec3(wp.log(sig[0]), wp.log(sig[1]), wp.log(sig[2]))
-    trace_epsilon = epsilon[0] + epsilon[1] + epsilon[2]
-    epsilon_hat = epsilon - wp.vec3(
-        trace_epsilon / 3.0, trace_epsilon / 3.0, trace_epsilon / 3.0
-    )
-    s_trial = 2.0 * model.mu[p] * epsilon_hat
-    s_trial_norm = wp.length(s_trial)
-    y = s_trial_norm - wp.sqrt(2.0 / 3.0) * model.yield_stress[p]
-    if y > 0:
-        mu_hat = model.mu[p] * (b_trial[0] + b_trial[1] + b_trial[2]) / 3.0
-        s_new_norm = s_trial_norm - y / (
-            1.0 + model.plastic_viscosity[mat] / (2.0 * mu_hat * dt)
-        )
-        s_new = (s_new_norm / s_trial_norm) * s_trial
-        epsilon_new = 1.0 / (2.0 * model.mu[p]) * s_new + wp.vec3(
-            trace_epsilon / 3.0, trace_epsilon / 3.0, trace_epsilon / 3.0
-        )
-        sig_elastic = wp.mat33(
-            wp.exp(epsilon_new[0]),
-            0.0,
-            0.0,
-            0.0,
-            wp.exp(epsilon_new[1]),
-            0.0,
-            0.0,
-            0.0,
-            wp.exp(epsilon_new[2]),
-        )
-        F_elastic = U * sig_elastic * wp.transpose(V)
-        return F_elastic
-    else:
-        return F_trial
-
-
 @wp.func
 def kirchoff_stress_hencky(
     U: wp.mat33, sig: wp.vec3, mu: float, lam: float
@@ -311,7 +247,11 @@ def kirchoff_stress_hencky(
 def mu_i_return_mapping(
     F_trial: wp.mat33, model: MPMModelStruct, p: int, mat: int, dt: float
 ):
-    # Local mu(I) rheology (TrackEUCLID), Dunatunga-Kamrin style return:
+    # Local mu(I) rheology (TrackEUCLID): the scalar mu(I) law of Jop, Forterre
+    # and Pouliquen inside a Hencky multiplicative return in the style of
+    # Dunatunga-Kamrin, WITHOUT their density/phase-separation and full stress
+    # algorithm (a repository-specific update, validated against the G0/G1
+    # gates):
     # Hencky elastic predictor, scalar plastic correction on the yield
     # surface tau_bar = mu(I) p with I = gamma_dot_p d sqrt(rho_s / p).
     # The return is deviatoric (non dilatant): J and the pressure are
@@ -494,7 +434,11 @@ def mu_i_phi_pressure(model: MPMModelStruct, mat: int, J: float, Jp_ref: float):
 def mu_i_phi_return_mapping(
     F_trial: wp.mat33, state: MPMStateStruct, model: MPMModelStruct, p: int, mat: int, dt: float
 ):
-    # Compressible mu(I)-Phi(I) (TrackEUCLID, material 11). Deviatoric mu(I) yield
+    # Compressible mu(I)-Phi(I) (TrackEUCLID, material 11). Repository-specific
+    # engineering model: the scalar mu(I) law is Jop-Forterre-Pouliquen, but the
+    # compaction EOS, the lagged reference volume, and the fixed dilatancy rate
+    # beta below are this codebase's own closure (validated in the TrackEUCLID
+    # gates), not a published algorithm. Deviatoric mu(I) yield
     # against the COMPACTION pressure p = K(Phi/Phi_c(I)-1)_+ (not the elastic EOS),
     # so the solid fraction relaxes toward the rate-dependent critical state Phi_c(I)
     # under a free surface, an emergent O(chi) observable density signal. The
@@ -1104,10 +1048,6 @@ def stress_update_particle(state: MPMStateStruct, model: MPMModelStruct, dt: flo
             state.particle_F[p] = sand_return_mapping(
                 state.particle_F_trial[p], state, model, p, mat
             )
-        elif mat == 3:  # visplas, with StVk+VM, no thickening
-            state.particle_F[p] = viscoplasticity_return_mapping_with_StVK(
-                state.particle_F_trial[p], model, p, mat, dt
-            )
         elif mat == 5:  # plasticine
             state.particle_F[p] = von_mises_return_mapping_with_damage(
                 state.particle_F_trial[p], model, p, mat
@@ -1130,7 +1070,7 @@ def stress_update_particle(state: MPMStateStruct, model: MPMModelStruct, dt: flo
             state.particle_F[p] = wp.mat33(Jcbr, 0.0, 0.0, 0.0, Jcbr, 0.0, 0.0, 0.0, Jcbr)
         elif mat == 7 or mat == 8:  # stationary / rigid, no deformation
             state.particle_F[p] = wp.mat33(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
-        else:  # jelly (0), snow (4), or custom
+        else:  # jelly (0)
             state.particle_F[p] = state.particle_F_trial[p]
 
         # also compute stress here
@@ -1149,16 +1089,16 @@ def stress_update_particle(state: MPMStateStruct, model: MPMModelStruct, dt: flo
                 state.particle_F[p], U, V, J, model.mu[p], model.lam[p]
             )
         if mat == 1:
-            stress = kirchoff_stress_StVK(
-                state.particle_F[p], U, V, sig, model.mu[p], model.lam[p]
-            )
+            # coaxial Hencky elasticity, tau = U diag(2 mu eps + lam tr eps) U^T,
+            # consistent with the log-space von-Mises return above. The fork's
+            # original form multiplied by V^T F^T, which injects an extra
+            # principal-stretch factor (tau_i scaled by sig_i): +100 percent
+            # stress at a 2x stretch, second-order small at the yield-limited
+            # elastic strains this material actually sustains. The jmpm port
+            # found and fixed the same bug; this is the backport.
+            stress = kirchoff_stress_hencky(U, sig, model.mu[p], model.lam[p])
         if mat == 2:
             stress = kirchoff_stress_drucker_prager(
-                state.particle_F[p], U, V, sig, model.mu[p], model.lam[p]
-            )
-        if mat == 3:
-            # temporarily use stvk, subject to change
-            stress = kirchoff_stress_StVK(
                 state.particle_F[p], U, V, sig, model.mu[p], model.lam[p]
             )
         if mat == 6:  # fluid

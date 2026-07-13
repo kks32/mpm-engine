@@ -19,6 +19,7 @@ nearest fork material (newtonian=10, mu_i_sand=9, mu_i_phi=11, jelly=0).
 from __future__ import annotations
 
 import dataclasses
+import math
 from dataclasses import dataclass
 from typing import Any
 
@@ -93,16 +94,29 @@ class Material:
         if self.base == "elastic":
             return "jelly", dict(E=self.E, nu=self.nu, density=self.density)
         if self.base == "vonmises":
-            # fork "metal" (id 1): StVK elastic predictor + von-Mises (J2) radial return.
-            # Identified by (G via E,nu) and yield_stress, with optional xi.
+            # fork "metal" (id 1): Hencky elastic predictor + von-Mises (J2) radial
+            # return. Identified by (G via E,nu) and yield_stress, with optional xi.
+            # The kernel gates the yield update on the hardening flag, so xi alone
+            # would be inert; the flag follows xi here.
             return "metal", dict(E=self.E, nu=self.nu, density=self.density,
-                                 yield_stress=self.yield_stress, xi=self.hardening_xi)
+                                 yield_stress=self.yield_stress, xi=self.hardening_xi,
+                                 hardening=1.0 if self.hardening_xi != 0.0 else 0.0)
         if self.base == "tabulated":
             if self.eta_table is None:
                 raise ValueError("tabulated material needs eta_table")
+            table = [float(v) for v in self.eta_table]
+            if len(table) < 2:
+                raise ValueError("eta_table needs at least 2 samples")
+            if not all(math.isfinite(v) for v in table):
+                raise ValueError("eta_table contains non-finite values")
+            if any(v < 0.0 for v in table):
+                raise ValueError("eta_table viscosities must be nonnegative")
+            if not (math.isfinite(self.eta_smin) and math.isfinite(self.eta_smax)
+                    and self.eta_smax > self.eta_smin):
+                raise ValueError("tabulated material needs smax > smin (finite)")
             return "tabulated_viscous", dict(
                 E=self.E, nu=self.nu, density=self.density, bulk_modulus=self.bulk_modulus,
-                eta_table=list(self.eta_table), eta_table_smin=self.eta_smin,
+                eta_table=table, eta_table_smin=self.eta_smin,
                 eta_table_smax=self.eta_smax,
             )
         raise ValueError(f"unknown material base {self.base!r}")

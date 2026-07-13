@@ -7,9 +7,13 @@ from warpmpm.kernels.warp_utils import *  # noqa: F401,F403
 from warpmpm.kernels.mpm_utils import *  # noqa: F401,F403
 
 
+# ids are pinned (dumps and caches store them); 3 and 4 are retired, not reused.
+# "foam" (3) shipped with an unfinished return map on a broken stress and "snow"
+# (4) never had a stress branch at all (zero stress); both were inherited from
+# the upstream fork and neither was reachable through the material factories.
 MATERIAL_NAME_TO_ID = {
-    "jelly": 0, "metal": 1, "sand": 2, "foam": 3,
-    "snow": 4, "plasticine": 5, "fluid": 6, "stationary": 7, "rigid": 8,
+    "jelly": 0, "metal": 1, "sand": 2,
+    "plasticine": 5, "fluid": 6, "stationary": 7, "rigid": 8,
     "mu_i_sand": 9, "newtonian": 10, "mu_i_phi": 11, "tabulated_viscous": 12,
     "tabulated_mu_i": 13,
 }

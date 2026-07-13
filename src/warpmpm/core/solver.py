@@ -174,6 +174,12 @@ class Solver:
             name, params = material.resolve()
         else:
             name, params = str(material), {}
+        # one global eta table exists on the model and only set_material installs
+        # it; the per-range path would silently keep the default zero table
+        if name in ("tabulated_viscous", "tabulated_mu_i"):
+            raise NotImplementedError(
+                "tabulated materials are global-only (one eta table on the model); "
+                "use set_material")
         params = {"material": name, **params, **overrides}
         self._sim.set_parameters_for_particles(start, end, params, device=self.device)
         return self
@@ -211,7 +217,9 @@ class Solver:
 
     def add_box(self, center, half_size, velocity=(0.0, 0.0, 0.0),
                 start_time: float = 0.0, end_time: float = 1.0e9) -> int:
-        """Add a kinematic, axis-aligned box-SDF collider.
+        """Add a kinematic, axis-aligned box collider (volumetric grid-node velocity
+        overwrite over the box, not surface-SDF contact; for oriented surface
+        contact with friction modes use add_sdf_collider).
 
         The collider imposes its velocity on covered grid nodes. Returns a handle for
         updates through set_box; the coupling layer uses this collider for robot tools.
@@ -353,10 +361,15 @@ class Solver:
         """Add an OPEN oriented mid-surface (warpmpm.geometry.CDFData) as a CPIC
         thin-boundary collider: particle-node transfers are severed across the
         surface, so it is watertight at any wall thickness, where an SDF collider
-        needs ~2 cells. Drive its pose with set_cdf_pose (set_sdf_pose's contract);
-        read the reaction wrench with cdf_wrench. Handles are a separate space from
-        the grid-BC colliders. Default band = min(built band, 2 dx); masking needs
-        at least 1.5 dx (the B-spline support radius)."""
+        needs ~2 cells. The compatibility masking follows Hu et al. 2018 Section 5,
+        but the contact treatment is this repository's own (blocked-deposit
+        masking, distance-weighted ghost with an impulse-capped Coulomb
+        projection and separation push, scatter-side wrench accounting), not a
+        line-by-line implementation of the paper's projection and penetration
+        handling. Drive the pose with set_cdf_pose (set_sdf_pose's contract);
+        read the reaction wrench with cdf_wrench. Handles are a separate space
+        from the grid-BC colliders. Default band = min(built band, 2 dx); masking
+        needs at least 1.5 dx (the B-spline support radius)."""
         return self._sim.add_cdf_collider(
             cdf.values, cdf.valid, cdf.origin, cdf.cell, cdf.band, center, quat=quat,
             velocity=velocity, omega=omega, band=band, surface=surface,
@@ -379,8 +392,12 @@ class Solver:
 
     def cdf_wrench(self, handle: int, dt: float) -> dict:
         """Reaction wrench the material exerts on a CDF collider, accumulated from
-        the ghost-projection impulses since the last reset (the thin-boundary
-        analogue of sdf_wrench). Returns {'force': (3,), 'torque': (3,)}."""
+        the BLOCKED p2g deposits (the momentum flux the sheet interrupts) since the
+        last reset. Scales linearly with the supported load but reads a
+        geometry-dependent fraction of the absolute value (~1/3 for a node-aligned
+        sheet; see docs/performance.md): a calibrated scale, not an FT sensor. For
+        calibrated absolute forces use an SDF collider. Returns
+        {'force': (3,), 'torque': (3,)}."""
         f = np.asarray(self._sim.mpm_state.cdf_reaction_force.numpy()[handle],
                        dtype=float)
         t = np.asarray(self._sim.mpm_state.cdf_reaction_torque.numpy()[handle],

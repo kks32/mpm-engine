@@ -7,6 +7,7 @@ end-effector drives the MPM gripper box and reads back the reaction wrench.
 """
 from __future__ import annotations
 
+import contextlib
 import os
 
 import numpy as np
@@ -103,10 +104,8 @@ class FrankaArm:
         """Release MuJoCo renderer resources, suppressing backend shutdown noise."""
         renderer = getattr(self, "renderer", None)
         if renderer is not None:
-            try:
+            with contextlib.suppress(Exception):
                 renderer.close()
-            except Exception:
-                pass
             self.renderer = None
 
     def __del__(self):

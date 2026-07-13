@@ -6,8 +6,14 @@ end to end through P2G/G2P, at tolerances set by grid discretization.
 
 1. Sliding block on a frictional incline (tilted gravity, axis-aligned plane):
    a = g (sin th - mu cos th); the mu > tan th block holds.
-2. Hydrostatic column: dp/dz = -rho g through the settled stress trace.
-3. Fixed-free elastic bar, longitudinal vibration: T = 4 L / sqrt(E/rho).
+2. Hydrostatic column: the basal support force equals rho V g, read from the
+   grid impulse (NOT a dp/dz fit through particle stress; see the test).
+3. Free-free elastic bar, longitudinal vibration: T = 2 L / sqrt(E/rho)
+   (NOT the sticky-clamped fixed-free variant; see the test).
+
+The two substitutions route around measured engine failure modes that the test
+docstrings document (particle-stress statics noise; sticky-clamp softening
+under tension). They are characterizations to fix, not physics gates passed.
 """
 from __future__ import annotations
 
