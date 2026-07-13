@@ -8,7 +8,8 @@ was extended by our group. This file records authorship and citations.
 ## Vendored numerical core (`src/warpmpm/kernels/`)
 
 The explicit MLS-MPM solver, the quadratic B-spline transfer, and the base materials
-(ids 0-8: jelly, metal, sand, foam, snow, plasticine, fluid, stationary, rigid) come from
+(ids 0-8: jelly, metal, sand, plasticine, fluid, stationary, rigid; the fork's foam and
+snow, ids 3-4, shipped broken upstream and are retired here) come from
 the UCLA **warp-mpm** of Zeshun Zong and collaborators (Chenfanfu Jiang's group). It is used
 in their published work and must be cited when this engine is used.
 
