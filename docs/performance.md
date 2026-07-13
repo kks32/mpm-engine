@@ -229,6 +229,16 @@ parts of the architecture are:
 Ideas 2 and 4 belong together as one CUDA-native follow-up, worth doing only if a
 profile shows P2G dominant after the implicit-solver work below.
 
+For a same-GPU head-to-head, `benchmarks/bench_vs_claymore.py` runs a dam break
+whose work profile (particle count, grid resolution, substep count) is set to
+match a claymore run; its docstring carries the full protocol, including the
+`-arch=sm_90` line ClaymoreUW's setup_cuda.cmake needs on a GH200. Reference
+point for this engine: 434 million particle-updates/s whole-pipeline on a GH200
+(the 192^3 pour, 340k particles, 0.78 ms per substep). Claymore's shared-memory
+P2G is expected to win the particle pass; the measured ratio is the price of
+this engine's portability, paid for Python scenes, arbitrary colliders, wrench
+readouts, and the CPU dev loop.
+
 ## Running on GPU clusters
 
 Two failure modes were observed on GH200 nodes:
