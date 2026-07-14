@@ -87,6 +87,10 @@ class Solver:
     # preserves the legacy |det(F)| behavior while making the event visible;
     # "raise" rejects it and "nan" marks invalid particles in fixed-shape exports.
     inversion_policy: str = "warn"
+    # Periodic boundary along x: transfers wrap the x node index and advection wraps
+    # particle x into [0, Lx). For steady chute flows (tilted gravity + periodic
+    # streamwise direction). Incompatible with CDF colliders and rigid bodies.
+    periodic_x: bool = False
     _sim: Any = field(default=None, init=False, repr=False)
     _step: int = field(default=0, init=False, repr=False)
     _tick: int = field(default=0, init=False, repr=False)
@@ -139,6 +143,8 @@ class Solver:
             grid_lim=self.grid.grid_lim,
             device=self.device,
         )
+        if self.periodic_x:
+            self._sim.mpm_model.periodic_x = 1
         if cov is not None and cov_mode == "step":
             # load_initial_data_from_torch calls initialize(), which builds a fresh
             # mpm_model with update_cov_with_F=False. Set the flag only after loading.
@@ -370,6 +376,8 @@ class Solver:
         read the reaction wrench with cdf_wrench. Handles are a separate space
         from the grid-BC colliders. Default band = min(built band, 2 dx); masking
         needs at least 1.5 dx (the B-spline support radius)."""
+        if self.periodic_x:
+            raise NotImplementedError("CDF colliders do not wrap the periodic x axis")
         return self._sim.add_cdf_collider(
             cdf.values, cdf.valid, cdf.origin, cdf.cell, cdf.band, center, quat=quat,
             velocity=velocity, omega=omega, band=band, surface=surface,
@@ -493,15 +501,21 @@ class Solver:
         # over-triggers because colliders legitimately stop fast particles within
         # the tick; if a real scene ever hits this, the fix is kernel-side index
         # clamping.
-        if x.min() < 1.5 * dx or x.max() > lim - 2.5 * dx:
+        # with periodic x the whole x-range is legitimate: guard y/z only and give
+        # the launch box the full x extent (transfers wrap the x index themselves)
+        g = x[:, 1:] if self.periodic_x else x
+        if g.min() < 1.5 * dx or g.max() > lim - 2.5 * dx:
             raise RuntimeError(
                 f"particles within 2 cells of the grid edge (x in "
-                f"[{x.min():.4f}, {x.max():.4f}] m, domain [0, {lim}] m, dx={dx:.4f}): "
+                f"[{g.min():.4f}, {g.max():.4f}] m, domain [0, {lim}] m, dx={dx:.4f}): "
                 f"the P2G stencil would write out of bounds. Enlarge grid_lim or add a "
                 f"bounding box / wall collider.")
         pad = 3.0 * dx + 1.5 * float(np.abs(v).max()) * dt * substeps
-        self._sim.grid_launch_box = self._sim._grid_box(x.min(0) - pad, x.max(0) + pad,
-                                                        halo=0)
+        lo = x.min(0) - pad
+        hi = x.max(0) + pad
+        if self.periodic_x:
+            lo[0], hi[0] = 0.0, lim
+        self._sim.grid_launch_box = self._sim._grid_box(lo, hi, halo=0)
     # --- imports (numpy, off the hot path; e.g. the leak-projection rescue net) -------
     def set_x(self, pos: np.ndarray) -> Solver:
         import torch

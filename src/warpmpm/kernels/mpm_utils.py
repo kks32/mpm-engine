@@ -824,9 +824,13 @@ def p2g_particle(state: MPMStateStruct, model: MPMModelStruct, dt: float, p: int
     #                       particle_C
     stress = state.particle_stress[p]
     grid_pos = state.particle_x[p] * model.inv_dx
-    base_pos_x = wp.int(grid_pos[0] - 0.5)
-    base_pos_y = wp.int(grid_pos[1] - 0.5)
-    base_pos_z = wp.int(grid_pos[2] - 0.5)
+    # floor, not toward-zero truncation: with periodic x a particle can sit at
+    # grid_pos < 0.5 where int() picks base 0 instead of -1 and the B-spline
+    # weights go invalid; for grid_pos - 0.5 >= 0 (every non-periodic scene, by
+    # the edge guard) floor and int agree bitwise
+    base_pos_x = wp.int(wp.floor(grid_pos[0] - 0.5))
+    base_pos_y = wp.int(wp.floor(grid_pos[1] - 0.5))
+    base_pos_z = wp.int(wp.floor(grid_pos[2] - 0.5))
     fx = grid_pos - wp.vec3(
         wp.float(base_pos_x), wp.float(base_pos_y), wp.float(base_pos_z)
     )
@@ -864,6 +868,8 @@ def p2g_particle(state: MPMStateStruct, model: MPMModelStruct, dt: float, p: int
                 ix = base_pos_x + i
                 iy = base_pos_y + j
                 iz = base_pos_z + k
+                if model.periodic_x != 0:  # chute flows: x wraps onto the grid
+                    ix = ((ix % model.grid_dim_x) + model.grid_dim_x) % model.grid_dim_x
                 weight = w[0, i] * w[1, j] * w[2, k]  # tricubic interpolation
                 dweight = compute_dweight(model, w, dw, i, j, k)
                 C = state.particle_C[p]
@@ -939,9 +945,13 @@ def grid_normalization_and_gravity(
 def g2p_particle(state: MPMStateStruct, model: MPMModelStruct, dt: float, p: int):
     if True:
         grid_pos = state.particle_x[p] * model.inv_dx
-        base_pos_x = wp.int(grid_pos[0] - 0.5)
-        base_pos_y = wp.int(grid_pos[1] - 0.5)
-        base_pos_z = wp.int(grid_pos[2] - 0.5)
+        # floor, not toward-zero truncation: with periodic x a particle can sit at
+        # grid_pos < 0.5 where int() picks base 0 instead of -1 and the B-spline
+        # weights go invalid; for grid_pos - 0.5 >= 0 (every non-periodic scene, by
+        # the edge guard) floor and int agree bitwise
+        base_pos_x = wp.int(wp.floor(grid_pos[0] - 0.5))
+        base_pos_y = wp.int(wp.floor(grid_pos[1] - 0.5))
+        base_pos_z = wp.int(wp.floor(grid_pos[2] - 0.5))
         fx = grid_pos - wp.vec3(
             wp.float(base_pos_x), wp.float(base_pos_y), wp.float(base_pos_z)
         )
@@ -986,6 +996,8 @@ def g2p_particle(state: MPMStateStruct, model: MPMModelStruct, dt: float, p: int
                     ix = base_pos_x + i
                     iy = base_pos_y + j
                     iz = base_pos_z + k
+                    if model.periodic_x != 0:  # chute flows: x wraps onto the grid
+                        ix = ((ix % model.grid_dim_x) + model.grid_dim_x) % model.grid_dim_x
                     dpos = wp.vec3(wp.float(i), wp.float(j), wp.float(k)) - fx
                     weight = w[0, i] * w[1, j] * w[2, k]  # tricubic interpolation
                     grid_v = state.grid_v_out[ix, iy, iz]
@@ -1011,7 +1023,14 @@ def g2p_particle(state: MPMStateStruct, model: MPMModelStruct, dt: float, p: int
                     new_F = new_F + wp.outer(grid_v, dweight)
 
         state.particle_v[p] = new_v
-        state.particle_x[p] = state.particle_x[p] + dt * new_v
+        x_new = state.particle_x[p] + dt * new_v
+        if model.periodic_x != 0:
+            lx = wp.float(model.grid_dim_x) * model.dx
+            if x_new[0] < 0.0:
+                x_new = wp.vec3(x_new[0] + lx, x_new[1], x_new[2])
+            if x_new[0] >= lx:
+                x_new = wp.vec3(x_new[0] - lx, x_new[1], x_new[2])
+        state.particle_x[p] = x_new
         state.particle_C[p] = new_C
         # new_F is the discrete velocity gradient L with L_ij = dv_i/dx_j
         # (sum_node v_node[i] * d w_node/dx_j). Stored for the TrackEUCLID dump.
@@ -1363,9 +1382,13 @@ def rigid_g2p_accumulate(
 
         # standard quadratic B-spline weights (same as g2p)
         grid_pos = state.particle_x[p] * model.inv_dx
-        base_x = wp.int(grid_pos[0] - 0.5)
-        base_y = wp.int(grid_pos[1] - 0.5)
-        base_z = wp.int(grid_pos[2] - 0.5)
+        # floor, not toward-zero truncation: with periodic x a particle can sit at
+        # grid_pos < 0.5 where int() picks base 0 instead of -1 and the B-spline
+        # weights go invalid; for grid_pos - 0.5 >= 0 (every non-periodic scene, by
+        # the edge guard) floor and int agree bitwise
+        base_x = wp.int(wp.floor(grid_pos[0] - 0.5))
+        base_y = wp.int(wp.floor(grid_pos[1] - 0.5))
+        base_z = wp.int(wp.floor(grid_pos[2] - 0.5))
         fx = grid_pos - wp.vec3(wp.float(base_x), wp.float(base_y), wp.float(base_z))
         wa = wp.vec3(1.5) - fx
         wb = fx - wp.vec3(1.0)

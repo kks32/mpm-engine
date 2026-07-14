@@ -392,6 +392,7 @@ class MPM_Simulator_WARP:
         # arrays are tiny and always allocated.
         self.mpm_model.n_cdf = 0
         self.mpm_model.cdf_mask_off = 0
+        self.mpm_model.periodic_x = 0
         for name in ("grid_cdf_tag", "grid_cdf_tag_prev", "grid_cdf_block"):
             setattr(self.mpm_state, name,
                     wp.zeros(shape=(1, 1, 1), dtype=int, device=device))

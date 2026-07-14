@@ -76,6 +76,9 @@ class MPMModelStruct:
 
     ####### CPIC thin-boundary (CDF) colliders: 0 = feature off, transfers untouched
     n_cdf: int
+    # periodic boundary along x: transfers wrap the x node index and advection
+    # wraps particle x (0 = off, transfers untouched). Used by chute flows.
+    periodic_x: int
     # test hook: 1 forces the full tag vote even where the block mask is empty
     # (the mask early-out is exact, and the bitwise gate proves it against this)
     cdf_mask_off: int
